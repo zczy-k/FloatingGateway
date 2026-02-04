@@ -1,0 +1,103 @@
+# Example configuration for SECONDARY router (preferred gateway)
+# This router is the preferred master and handles traffic when healthy.
+# It uses internet mode health checks to verify international connectivity.
+#
+# Deploy to: /etc/gateway-agent/config.yaml on the secondary router
+
+version: 1
+role: secondary
+
+lan:
+  # Network interface connected to LAN
+  iface: eth0  # Standard Linux interface name
+  # CIDR is auto-detected from interface if not specified
+  # cidr: 192.168.1.0/24
+  
+  # Virtual IP - the gateway address all clients will use
+  # MUST be the same on both routers and NOT used by any other device
+  vip: 192.168.1.1
+
+routers:
+  # Self IP is auto-detected from interface if not specified
+  # self_ip: 192.168.1.3
+  
+  # IP address of the primary (peer) router
+  peer_ip: 192.168.1.2
+
+keepalived:
+  # Virtual Router ID - must be same on both routers, unique on network
+  vrid: 51
+  # Advertisement interval in seconds
+  advert_int: 1
+  # Priority settings
+  priority:
+    primary: 100    # Lower priority = backup
+    secondary: 150  # Higher priority = preferred master
+
+failover:
+  # Which role should be master when both are healthy
+  prefer: secondary
+  # Allow higher priority router to reclaim master
+  preempt: true
+  # Delay before preemption (allows for flapping prevention)
+  preempt_delay_sec: 30
+
+health:
+  # Health check mode:
+  # - basic: check local connectivity (ping domestic DNS)
+  # - internet: check international connectivity (for proxy/VPN scenarios)
+  mode: internet  # Secondary checks international connectivity
+  
+  # How often to run health checks
+  interval_sec: 2
+  # Consecutive failures before marking unhealthy
+  fail_count: 3
+  # Consecutive successes before marking healthy again
+  recover_count: 5
+  # Minimum hold-down time before allowing recovery
+  hold_down_sec: 10
+  
+  # k-of-n mode: require k out of n checks to pass
+  # Empty means all checks must pass
+  # k_of_n: "2/3"  # At least 2 of 3 checks must pass
+  
+  # Basic mode checks (not used for secondary with internet mode)
+  basic:
+    checks:
+      - type: ping
+        target: 223.5.5.5
+        timeout: 3
+      - type: dns
+        resolver: 223.5.5.5
+        domain: baidu.com
+        timeout: 3
+
+  # Internet mode checks (verify international connectivity)
+  internet:
+    checks:
+      # Cloudflare DNS - fast, reliable
+      - type: ping
+        target: 1.1.1.1
+        timeout: 3
+      
+      # DNS resolution test - verifies DNS works
+      - type: dns
+        resolver: 1.1.1.1
+        domain: google.com
+        timeout: 3
+      
+      # TCP connection test - verifies HTTPS connectivity
+      - type: tcp
+        target: 1.1.1.1
+        port: 443
+        timeout: 3
+      
+      # Optional: HTTP check for full connectivity test
+      # - type: http
+      #   url: https://www.google.com/generate_204
+      #   timeout: 5
+
+# OpenWrt-specific settings (not applicable for Linux secondary)
+openwrt:
+  dhcp:
+    auto_set_gateway: false
