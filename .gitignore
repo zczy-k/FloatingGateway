@@ -2,6 +2,12 @@
 dist/
 *.exe
 
+# Go (let CI generate go.sum)
+go.sum
+
+# Misc
+-p
+
 # IDE
 .idea/
 .vscode/
