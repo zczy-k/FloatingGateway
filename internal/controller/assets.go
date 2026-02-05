@@ -10,21 +10,21 @@ func getAssets() map[string][]byte {
 }
 
 const indexHTML = `<!DOCTYPE html>
-<html lang="en">
+<html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Floating Gateway Controller</title>
+    <title>浮动网关控制台</title>
     <link rel="stylesheet" href="/style.css">
 </head>
 <body>
     <div id="app">
         <header>
-            <h1>Floating Gateway</h1>
+            <h1>浮动网关 (Floating Gateway)</h1>
             <div id="vip-status">
-                <span class="label">VIP:</span>
+                <span class="label">虚拟网关 IP (VIP):</span>
                 <span id="vip-address">-</span>
-                <span class="label">Master:</span>
+                <span class="label">当前主控 (Master):</span>
                 <span id="current-master">-</span>
             </div>
         </header>
@@ -32,15 +32,15 @@ const indexHTML = `<!DOCTYPE html>
         <main>
             <section id="routers-section">
                 <div class="section-header">
-                    <h2>Routers</h2>
-                    <button id="btn-add-router" class="btn btn-primary">Add Router</button>
-                    <button id="btn-refresh" class="btn">Refresh</button>
+                    <h2>路由器管理</h2>
+                    <button id="btn-add-router" class="btn btn-primary">添加路由器</button>
+                    <button id="btn-refresh" class="btn">刷新状态</button>
                 </div>
                 <div id="routers-grid"></div>
             </section>
 
             <section id="logs-section">
-                <h2>Activity Log</h2>
+                <h2>操作日志</h2>
                 <div id="logs"></div>
             </section>
         </main>
@@ -48,42 +48,42 @@ const indexHTML = `<!DOCTYPE html>
         <!-- Add Router Modal -->
         <div id="modal-add-router" class="modal">
             <div class="modal-content">
-                <h3>Add Router</h3>
+                <h3>添加路由器</h3>
                 <form id="form-add-router">
                     <div class="form-group">
-                        <label>Name</label>
-                        <input type="text" name="name" required placeholder="e.g., openwrt-main">
+                        <label>名称</label>
+                        <input type="text" name="name" required placeholder="例如: openwrt-main">
                     </div>
                     <div class="form-group">
-                        <label>Host</label>
+                        <label>主机地址 (IP)</label>
                         <input type="text" name="host" required placeholder="192.168.1.1">
                     </div>
                     <div class="form-group">
-                        <label>Port</label>
+                        <label>SSH 端口</label>
                         <input type="number" name="port" value="22">
                     </div>
                     <div class="form-group">
-                        <label>User</label>
+                        <label>SSH 用户</label>
                         <input type="text" name="user" required value="root">
                     </div>
                     <div class="form-group">
-                        <label>Password</label>
+                        <label>SSH 密码</label>
                         <input type="password" name="password">
                     </div>
                     <div class="form-group">
-                        <label>SSH Key File</label>
+                        <label>SSH 私钥文件路径</label>
                         <input type="text" name="key_file" placeholder="~/.ssh/id_rsa">
                     </div>
                     <div class="form-group">
-                        <label>Role</label>
+                        <label>角色</label>
                         <select name="role" required>
-                            <option value="primary">Primary (Backup Gateway)</option>
-                            <option value="secondary" selected>Secondary (Preferred Gateway)</option>
+                            <option value="primary">主路由 (Primary - 备用网关)</option>
+                            <option value="secondary" selected>旁路由 (Secondary - 首选网关)</option>
                         </select>
                     </div>
                     <div class="form-actions">
-                        <button type="button" class="btn" onclick="closeModal('modal-add-router')">Cancel</button>
-                        <button type="submit" class="btn btn-primary">Add</button>
+                        <button type="button" class="btn" onclick="closeModal('modal-add-router')">取消</button>
+                        <button type="submit" class="btn btn-primary">确定添加</button>
                     </div>
                 </form>
             </div>
@@ -113,7 +113,7 @@ const styleCSS = `* {
 }
 
 body {
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
     background: var(--bg);
     color: var(--text);
     min-height: 100vh;
@@ -515,7 +515,7 @@ async function apiCall(endpoint, options = {}) {
         if (resp.status === 204) return null;
         return await resp.json();
     } catch (e) {
-        log('API Error: ' + e.message, 'error');
+        log('接口错误: ' + e.message, 'error');
         throw e;
     }
 }
@@ -526,12 +526,12 @@ async function refreshStatus() {
         const status = await apiCall('/status');
         
         $('#vip-address').textContent = status.vip || '-';
-        $('#current-master').textContent = status.current_master || 'None';
+        $('#current-master').textContent = status.current_master || '无';
         
         routers = status.routers || [];
         renderRouters();
     } catch (e) {
-        console.error('Failed to refresh status:', e);
+        console.error('刷新状态失败:', e);
     }
 }
 
@@ -554,7 +554,8 @@ function renderRouters() {
         if (router.healthy !== undefined && router.healthy !== null) {
             const healthClass = router.healthy ? 'healthy' : 'unhealthy';
             const healthIcon = router.healthy ? '✓' : '✗';
-            healthHtml = '<span class="health-indicator ' + healthClass + '">' + healthIcon + ' Health</span>';
+            const healthText = router.healthy ? '健康' : '异常';
+            healthHtml = '<span class="health-indicator ' + healthClass + '">' + healthIcon + ' ' + healthText + '</span>';
         }
         
         let vrrpHtml = '';
@@ -563,88 +564,99 @@ function renderRouters() {
             vrrpHtml = '<span class="vrrp-state ' + vrrpClass + '">' + router.vrrp_state + '</span>';
         }
         
+        const roleText = router.role === 'primary' ? '主路由' : '旁路由';
+        const statusTextMap = {
+            'online': '在线',
+            'offline': '离线',
+            'installing': '正在安装',
+            'uninstalling': '正在卸载',
+            'unknown': '未知',
+            'error': '错误'
+        };
+        const statusText = statusTextMap[statusClass] || statusClass;
+        
         card.innerHTML = 
             '<div class="router-card-header">' +
                 '<div>' +
                     '<div class="router-name">' + router.name + '</div>' +
-                    '<span class="router-role ' + roleClass + '">' + router.role + '</span>' +
+                    '<span class="router-role ' + roleClass + '">' + roleText + '</span>' +
                 '</div>' +
                 '<span class="status-badge ' + statusClass + '">' +
                     '<span class="status-dot"></span>' +
-                    statusClass +
+                    statusText +
                 '</span>' +
             '</div>' +
             '<div class="router-info">' +
-                '<div><span class="label">Host:</span> <span class="value">' + router.host + ':' + router.port + '</span></div>' +
-                '<div><span class="label">Platform:</span> <span class="value">' + (router.platform || '-') + '</span></div>' +
-                '<div><span class="label">Agent:</span> <span class="value">' + (router.agent_version || 'Not installed') + '</span></div>' +
-                '<div><span class="label">VRRP:</span> ' + (vrrpHtml || '<span class="value">-</span>') + '</div>' +
-                '<div><span class="label">Health:</span> ' + (healthHtml || '<span class="value">-</span>') + '</div>' +
+                '<div><span class="label">主机:</span> <span class="value">' + router.host + ':' + router.port + '</span></div>' +
+                '<div><span class="label">系统:</span> <span class="value">' + (router.platform || '-') + '</span></div>' +
+                '<div><span class="label">Agent:</span> <span class="value">' + (router.agent_version || '未安装') + '</span></div>' +
+                '<div><span class="label">VRRP状态:</span> ' + (vrrpHtml || '<span class="value">-</span>') + '</div>' +
+                '<div><span class="label">健康状态:</span> ' + (healthHtml || '<span class="value">-</span>') + '</div>' +
             '</div>' +
             '<div class="router-actions">' +
-                '<button class="btn btn-sm" onclick="probeRouter(\'' + router.name + '\')">Probe</button>' +
+                '<button class="btn btn-sm" onclick="probeRouter(\'' + router.name + '\')">探测</button>' +
                 (router.agent_version 
-                    ? '<button class="btn btn-sm btn-danger" onclick="uninstallRouter(\'' + router.name + '\')">Uninstall</button>'
-                    : '<button class="btn btn-sm btn-primary" onclick="installRouter(\'' + router.name + '\')">Install</button>') +
-                '<button class="btn btn-sm btn-danger" onclick="deleteRouter(\'' + router.name + '\')">Delete</button>' +
+                    ? '<button class="btn btn-sm btn-danger" onclick="uninstallRouter(\'' + router.name + '\')">卸载 Agent</button>'
+                    : '<button class="btn btn-sm btn-primary" onclick="installRouter(\'' + router.name + '\')">安装 Agent</button>') +
+                '<button class="btn btn-sm btn-danger" onclick="deleteRouter(\'' + router.name + '\')">删除</button>' +
             '</div>';
         
         grid.appendChild(card);
     });
     
     if (routers.length === 0) {
-        grid.innerHTML = '<p style="color: var(--text-muted)">No routers configured. Click "Add Router" to get started.</p>';
+        grid.innerHTML = '<p style="color: var(--text-muted)">暂无路由器。点击“添加路由器”开始。</p>';
     }
 }
 
 // Router actions
 async function probeRouter(name) {
-    log('Probing ' + name + '...');
+    log('正在探测 ' + name + '...');
     try {
         await apiCall('/routers/' + name + '/probe', { method: 'POST' });
-        log('Probed ' + name, 'success');
+        log('探测完成: ' + name, 'success');
         await refreshStatus();
     } catch (e) {
-        log('Probe failed: ' + e.message, 'error');
+        log('探测失败: ' + e.message, 'error');
     }
 }
 
 async function installRouter(name) {
-    if (!confirm('Install gateway-agent on ' + name + '?')) return;
+    if (!confirm('确定要在 ' + name + ' 上安装 gateway-agent 吗？')) return;
     
-    log('Installing agent on ' + name + '...');
+    log('正在 ' + name + ' 上安装 Agent...');
     try {
         await apiCall('/routers/' + name + '/install', { method: 'POST' });
-        log('Installation started on ' + name, 'success');
+        log('已开始安装: ' + name, 'success');
         // Poll for completion
         setTimeout(refreshStatus, 5000);
     } catch (e) {
-        log('Install failed: ' + e.message, 'error');
+        log('安装失败: ' + e.message, 'error');
     }
 }
 
 async function uninstallRouter(name) {
-    if (!confirm('Uninstall gateway-agent from ' + name + '?')) return;
+    if (!confirm('确定要从 ' + name + ' 上卸载 gateway-agent 吗？')) return;
     
-    log('Uninstalling agent from ' + name + '...');
+    log('正在从 ' + name + ' 上卸载 Agent...');
     try {
         await apiCall('/routers/' + name + '/uninstall', { method: 'POST' });
-        log('Uninstallation started on ' + name, 'success');
+        log('已开始卸载: ' + name, 'success');
         setTimeout(refreshStatus, 3000);
     } catch (e) {
-        log('Uninstall failed: ' + e.message, 'error');
+        log('卸载失败: ' + e.message, 'error');
     }
 }
 
 async function deleteRouter(name) {
-    if (!confirm('Remove router ' + name + ' from management?')) return;
+    if (!confirm('确定要移除路由器 ' + name + ' 吗？')) return;
     
     try {
         await apiCall('/routers/' + name, { method: 'DELETE' });
-        log('Removed ' + name, 'success');
+        log('已移除: ' + name, 'success');
         await refreshStatus();
     } catch (e) {
-        log('Delete failed: ' + e.message, 'error');
+        log('移除失败: ' + e.message, 'error');
     }
 }
 
@@ -661,7 +673,7 @@ function closeModal(id) {
 document.addEventListener('DOMContentLoaded', () => {
     // Initial load
     refreshStatus();
-    log('Controller UI loaded');
+    log('控制台已加载');
     
     // Auto refresh every 30s
     setInterval(refreshStatus, 30000);
@@ -673,7 +685,7 @@ document.addEventListener('DOMContentLoaded', () => {
     
     // Refresh button
     $('#btn-refresh').addEventListener('click', () => {
-        log('Refreshing...');
+        log('正在刷新...');
         refreshStatus();
     });
     
@@ -696,12 +708,12 @@ document.addEventListener('DOMContentLoaded', () => {
                 method: 'POST',
                 body: JSON.stringify(router)
             });
-            log('Added router ' + router.name, 'success');
+            log('已添加路由器: ' + router.name, 'success');
             closeModal('modal-add-router');
             form.reset();
             await refreshStatus();
         } catch (e) {
-            log('Failed to add router: ' + e.message, 'error');
+            log('添加路由器失败: ' + e.message, 'error');
         }
     });
     

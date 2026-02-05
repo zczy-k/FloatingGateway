@@ -4,6 +4,7 @@ package main
 import (
 	"flag"
 	"fmt"
+	"net"
 	"os"
 	"os/signal"
 	"strings"
@@ -17,7 +18,7 @@ import (
 
 const (
 	defaultConfigPath = "controller.yaml"
-	version           = "1.0.1"
+	version           = "1.0.2"
 )
 
 func main() {
@@ -43,30 +44,30 @@ func main() {
 	case "help", "-h", "--help":
 		printUsage()
 	default:
-		fmt.Fprintf(os.Stderr, "Unknown command: %s\n", os.Args[1])
+		fmt.Fprintf(os.Stderr, "未知命令: %s\n", os.Args[1])
 		printUsage()
 		os.Exit(1)
 	}
 }
 
 func printUsage() {
-	fmt.Println(`gateway-controller - Floating Gateway Controller
+	fmt.Println(`gateway-controller - 浮动网关控制台
 
-Usage:
-  gateway-controller <command> [options]
+用法:
+  gateway-controller <命令> [选项]
 
-Commands:
-  serve       Start the web UI and API server (opens browser automatically)
-  probe       Probe all routers for status
-  install     Install agent on routers
-  uninstall   Uninstall agent from routers
-  status      Show overall status
-  version     Print version information
+命令:
+  serve       启动 Web 界面和 API 服务 (自动打开浏览器)
+  probe       探测所有路由器状态
+  install     在路由器上安装 Agent
+  uninstall   从路由器上卸载 Agent
+  status      显示总体状态
+  version     打印版本信息
 
-Options:
-  -c, --config   Path to config file (default: controller.yaml)
+选项:
+  -c, --config   配置文件路径 (默认: controller.yaml)
 
-Examples:
+示例:
   gateway-controller serve -c controller.yaml
   gateway-controller probe
   gateway-controller install --router=openwrt-main
@@ -76,9 +77,40 @@ Examples:
 func loadManager(configPath string) (*controller.Manager, error) {
 	manager, err := controller.NewManager(configPath)
 	if err != nil {
-		return nil, fmt.Errorf("load config: %w", err)
+		return nil, fmt.Errorf("加载配置失败: %w", err)
 	}
 	return manager, nil
+}
+
+func getLocalIP() string {
+	addrs, err := net.InterfaceAddrs()
+	if err != nil {
+		return "localhost"
+	}
+	
+	// Try to find a real LAN IP first
+	for _, address := range addrs {
+		if ipnet, ok := address.(*net.IPNet); ok && !ipnet.IP.IsLoopback() {
+			if ipnet.IP.To4() != nil {
+				ip := ipnet.IP.String()
+				// Prefer common private IP ranges
+				if strings.HasPrefix(ip, "192.168.") || strings.HasPrefix(ip, "10.") || strings.HasPrefix(ip, "172.") {
+					return ip
+				}
+			}
+		}
+	}
+	
+	// Fallback to first non-loopback IPv4
+	for _, address := range addrs {
+		if ipnet, ok := address.(*net.IPNet); ok && !ipnet.IP.IsLoopback() {
+			if ipnet.IP.To4() != nil {
+				return ipnet.IP.String()
+			}
+		}
+	}
+	
+	return "localhost"
 }
 
 func serveCmd(args []string) {
@@ -91,13 +123,13 @@ func serveCmd(args []string) {
 
 	manager, err := loadManager(*configPath)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error loading config: %v\n", err)
+		fmt.Fprintf(os.Stderr, "加载配置失败: %v\n", err)
 		os.Exit(1)
 	}
 
 	// If config file doesn't exist, it will be created on first save
 	if _, err := os.Stat(*configPath); os.IsNotExist(err) {
-		fmt.Printf("Config file %s not found. Starting in setup mode (defaults: :8080)\n", *configPath)
+		fmt.Printf("配置文件 %s 未找到。将以设置模式启动 (默认监听: :8080)\n", *configPath)
 	}
 
 	// Determine listen address
@@ -109,25 +141,28 @@ func serveCmd(args []string) {
 		addr = ":8080"
 	}
 
-	fmt.Printf("Starting gateway-controller on %s\n", addr)
+	fmt.Printf("正在启动浮动网关控制台，监听: %s\n", addr)
 
 	// Determine the URL to open
 	host := "localhost"
 	port := addr
 	if strings.Contains(addr, ":") {
 		parts := strings.Split(addr, ":")
-		if parts[0] != "" {
+		if parts[0] != "" && parts[0] != "0.0.0.0" {
 			host = parts[0]
+		} else {
+			// Listen on all interfaces, try to find local IP
+			host = getLocalIP()
 		}
 		port = ":" + parts[1]
 	}
 	url := fmt.Sprintf("http://%s%s", host, port)
-	fmt.Printf("Open %s in your browser\n", url)
+	fmt.Printf("请在浏览器中打开: %s\n", url)
 
 	// Open browser in background if requested
 	if !*noBrowser {
 		go func() {
-			time.Sleep(500 * time.Millisecond) // Wait a bit for server to start
+			time.Sleep(1 * time.Second) // Wait a bit for server to start
 			openBrowser(url)
 		}()
 	}
@@ -140,12 +175,12 @@ func serveCmd(args []string) {
 
 	go func() {
 		<-sigCh
-		fmt.Println("\nShutting down...")
+		fmt.Println("\n正在关闭...")
 		server.Stop()
 	}()
 
 	if err := server.Start(addr); err != nil {
-		fmt.Fprintf(os.Stderr, "Server error: %v\n", err)
+		fmt.Fprintf(os.Stderr, "服务器错误: %v\n", err)
 		os.Exit(1)
 	}
 }
@@ -160,10 +195,10 @@ func openBrowser(url string) {
 	case "darwin":
 		err = exec.Command("open", url).Start()
 	default:
-		err = fmt.Errorf("unsupported platform")
+		err = fmt.Errorf("不支持的平台")
 	}
 	if err != nil {
-		fmt.Printf("Failed to open browser: %v\n", err)
+		fmt.Printf("无法自动打开浏览器: %v\n", err)
 	}
 }
 
@@ -176,51 +211,83 @@ func probeCmd(args []string) {
 
 	manager, err := loadManager(*configPath)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		fmt.Fprintf(os.Stderr, "错误: %v\n", err)
 		os.Exit(1)
 	}
 
 	if *routerName != "" {
 		router := manager.GetRouter(*routerName)
 		if router == nil {
-			fmt.Fprintf(os.Stderr, "Router %q not found\n", *routerName)
+			fmt.Fprintf(os.Stderr, "未找到路由器 %q\n", *routerName)
 			os.Exit(1)
 		}
-		fmt.Printf("Probing %s...\n", router.Name)
+		fmt.Printf("正在探测 %s...\n", router.Name)
 		if err := manager.Probe(router); err != nil {
-			fmt.Printf("  Status: OFFLINE (%v)\n", err)
+			fmt.Printf("  状态: 离线 (%v)\n", err)
 		} else {
-			fmt.Printf("  Status: %s\n", router.Status)
-			fmt.Printf("  Platform: %s\n", router.Platform)
-			fmt.Printf("  Agent: %s\n", router.AgentVer)
+			fmt.Printf("  状态: %s\n", translateStatus(router.Status))
+			fmt.Printf("  平台: %s\n", router.Platform)
+			fmt.Printf("  Agent 版本: %s\n", router.AgentVer)
 			if router.VRRPState != "" {
-				fmt.Printf("  VRRP: %s\n", router.VRRPState)
+				fmt.Printf("  VRRP 状态: %s\n", router.VRRPState)
 			}
 		}
 	} else {
-		fmt.Println("Probing all routers...")
+		fmt.Println("正在探测所有路由器...")
 		manager.ProbeAll()
 		for _, router := range manager.GetRouters() {
-			fmt.Printf("\n%s (%s):\n", router.Name, router.Role)
-			fmt.Printf("  Host: %s:%d\n", router.Host, router.Port)
-			fmt.Printf("  Status: %s\n", router.Status)
+			fmt.Printf("\n%s (%s):\n", router.Name, translateRole(router.Role))
+			fmt.Printf("  主机: %s:%d\n", router.Host, router.Port)
+			fmt.Printf("  状态: %s\n", translateStatus(router.Status))
 			if router.Status == controller.StatusOnline {
-				fmt.Printf("  Platform: %s\n", router.Platform)
+				fmt.Printf("  平台: %s\n", router.Platform)
 				if router.AgentVer != "" {
-					fmt.Printf("  Agent: %s\n", router.AgentVer)
+					fmt.Printf("  Agent 版本: %s\n", router.AgentVer)
 					if router.VRRPState != "" {
-						fmt.Printf("  VRRP: %s\n", router.VRRPState)
+						fmt.Printf("  VRRP 状态: %s\n", router.VRRPState)
 					}
 					if router.Healthy != nil {
-						fmt.Printf("  Healthy: %v\n", *router.Healthy)
+						healthStr := "异常"
+						if *router.Healthy {
+							healthStr = "健康"
+						}
+						fmt.Printf("  健康状态: %s\n", healthStr)
 					}
 				} else {
-					fmt.Printf("  Agent: Not installed\n")
+					fmt.Printf("  Agent: 未安装\n")
 				}
 			} else if router.Error != "" {
-				fmt.Printf("  Error: %s\n", router.Error)
+				fmt.Printf("  错误: %s\n", router.Error)
 			}
 		}
+	}
+}
+
+func translateStatus(s controller.RouterStatus) string {
+	switch s {
+	case controller.StatusOnline:
+		return "在线"
+	case controller.StatusOffline:
+		return "离线"
+	case controller.StatusInstalling:
+		return "安装中"
+	case controller.StatusUninstalling:
+		return "卸载中"
+	case controller.StatusError:
+		return "错误"
+	default:
+		return "未知"
+	}
+}
+
+func translateRole(r config.Role) string {
+	switch r {
+	case config.RolePrimary:
+		return "主路由 (Primary)"
+	case config.RoleSecondary:
+		return "旁路由 (Secondary)"
+	default:
+		return string(r)
 	}
 }
 
@@ -234,7 +301,7 @@ func installCmd(args []string) {
 
 	manager, err := loadManager(*configPath)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		fmt.Fprintf(os.Stderr, "错误: %v\n", err)
 		os.Exit(1)
 	}
 
@@ -244,22 +311,22 @@ func installCmd(args []string) {
 	} else if *routerName != "" {
 		router := manager.GetRouter(*routerName)
 		if router == nil {
-			fmt.Fprintf(os.Stderr, "Router %q not found\n", *routerName)
+			fmt.Fprintf(os.Stderr, "未找到路由器 %q\n", *routerName)
 			os.Exit(1)
 		}
 		routers = []*controller.Router{router}
 	} else {
-		fmt.Fprintf(os.Stderr, "Error: --router or --all is required\n")
+		fmt.Fprintf(os.Stderr, "错误: 需要提供 --router 或 --all 参数\n")
 		os.Exit(1)
 	}
 
 	for _, router := range routers {
-		fmt.Printf("Installing agent on %s...\n", router.Name)
+		fmt.Printf("正在 %s 上安装 Agent...\n", router.Name)
 		agentConfig := manager.GenerateAgentConfig(router)
 		if err := manager.Install(router, agentConfig); err != nil {
-			fmt.Fprintf(os.Stderr, "  Failed: %v\n", err)
+			fmt.Fprintf(os.Stderr, "  失败: %v\n", err)
 		} else {
-			fmt.Printf("  Success!\n")
+			fmt.Printf("  成功!\n")
 		}
 	}
 }
@@ -274,7 +341,7 @@ func uninstallCmd(args []string) {
 
 	manager, err := loadManager(*configPath)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		fmt.Fprintf(os.Stderr, "错误: %v\n", err)
 		os.Exit(1)
 	}
 
@@ -284,21 +351,21 @@ func uninstallCmd(args []string) {
 	} else if *routerName != "" {
 		router := manager.GetRouter(*routerName)
 		if router == nil {
-			fmt.Fprintf(os.Stderr, "Router %q not found\n", *routerName)
+			fmt.Fprintf(os.Stderr, "未找到路由器 %q\n", *routerName)
 			os.Exit(1)
 		}
 		routers = []*controller.Router{router}
 	} else {
-		fmt.Fprintf(os.Stderr, "Error: --router or --all is required\n")
+		fmt.Fprintf(os.Stderr, "错误: 需要提供 --router 或 --all 参数\n")
 		os.Exit(1)
 	}
 
 	for _, router := range routers {
-		fmt.Printf("Uninstalling agent from %s...\n", router.Name)
+		fmt.Printf("正在从 %s 卸载 Agent...\n", router.Name)
 		if err := manager.Uninstall(router); err != nil {
-			fmt.Fprintf(os.Stderr, "  Failed: %v\n", err)
+			fmt.Fprintf(os.Stderr, "  失败: %v\n", err)
 		} else {
-			fmt.Printf("  Success!\n")
+			fmt.Printf("  成功!\n")
 		}
 	}
 }
@@ -311,21 +378,21 @@ func statusCmd(args []string) {
 
 	manager, err := loadManager(*configPath)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		fmt.Fprintf(os.Stderr, "错误: %v\n", err)
 		os.Exit(1)
 	}
 
 	cfg := manager.GetConfig()
 
-	fmt.Println("Floating Gateway Status")
+	fmt.Println("浮动网关状态汇总")
 	fmt.Println("=======================")
-	fmt.Printf("VIP: %s\n", cfg.LAN.VIP)
-	fmt.Printf("CIDR: %s\n", cfg.LAN.CIDR)
-	fmt.Printf("VRID: %d\n", cfg.Keepalived.VRID)
+	fmt.Printf("VIP 地址: %s\n", cfg.LAN.VIP)
+	fmt.Printf("网段 (CIDR): %s\n", cfg.LAN.CIDR)
+	fmt.Printf("VRID 标识: %d\n", cfg.Keepalived.VRID)
 	fmt.Println()
 
 	// Probe all routers
-	fmt.Println("Probing routers...")
+	fmt.Println("正在探测路由器状态...")
 	manager.ProbeAll()
 
 	// Find master
@@ -337,10 +404,14 @@ func statusCmd(args []string) {
 		}
 	}
 
-	fmt.Printf("\nCurrent Master: %s\n", master)
+	if master == "" {
+		fmt.Println("当前主控 (Master): 无")
+	} else {
+		fmt.Printf("当前主控 (Master): %s\n", master)
+	}
 	fmt.Println()
 
-	fmt.Println("Routers:")
+	fmt.Println("路由器列表:")
 	for _, router := range manager.GetRouters() {
 		statusIcon := "?"
 		switch router.Status {
@@ -358,13 +429,13 @@ func statusCmd(args []string) {
 		healthStr := ""
 		if router.Healthy != nil {
 			if *router.Healthy {
-				healthStr = " (healthy)"
+				healthStr = " (健康)"
 			} else {
-				healthStr = " (unhealthy)"
+				healthStr = " (异常)"
 			}
 		}
 
 		fmt.Printf("  [%s] %s (%s) - %s:%d%s%s\n",
-			statusIcon, router.Name, router.Role, router.Host, router.Port, vrrpStr, healthStr)
+			statusIcon, router.Name, translateRole(router.Role), router.Host, router.Port, vrrpStr, healthStr)
 	}
 }
