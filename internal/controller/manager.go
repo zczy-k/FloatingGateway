@@ -56,17 +56,21 @@ type Router struct {
 
 // ControllerConfig holds controller configuration.
 type ControllerConfig struct {
-	Version  int       `yaml:"version"`
-	Listen   string    `yaml:"listen"`
-	Routers  []*Router `yaml:"routers"`
-	AgentBin string    `yaml:"agent_bin"` // Path to gateway-agent binary
+	Version  int       `yaml:"version" json:"version"`
+	Listen   string    `yaml:"listen" json:"listen"`
+	Routers  []*Router `yaml:"routers" json:"routers"`
+	AgentBin string    `yaml:"agent_bin" json:"agent_bin"` // Path to gateway-agent binary
 	LAN      struct {
-		VIP  string `yaml:"vip"`
-		CIDR string `yaml:"cidr"`
-	} `yaml:"lan"`
+		VIP   string `yaml:"vip" json:"vip"`
+		CIDR  string `yaml:"cidr" json:"cidr"`
+		Iface string `yaml:"iface" json:"iface"`
+	} `yaml:"lan" json:"lan"`
 	Keepalived struct {
-		VRID int `yaml:"vrid"`
-	} `yaml:"keepalived"`
+		VRID int `yaml:"vrid" json:"vrid"`
+	} `yaml:"keepalived" json:"keepalived"`
+	Health struct {
+		Mode config.HealthMode `yaml:"mode" json:"mode"`
+	} `yaml:"health" json:"health"`
 }
 
 // Manager handles router management operations.
@@ -549,7 +553,11 @@ func (m *Manager) GenerateAgentConfig(r *Router) *config.Config {
 	cfg.Role = r.Role
 	cfg.LAN.VIP = m.config.LAN.VIP
 	cfg.LAN.CIDR = m.config.LAN.CIDR
+	cfg.LAN.Iface = m.config.LAN.Iface
 	cfg.Keepalived.VRID = m.config.Keepalived.VRID
+	if m.config.Health.Mode != "" {
+		cfg.Health.Mode = m.config.Health.Mode
+	}
 
 	// Find peer
 	for _, other := range m.config.Routers {

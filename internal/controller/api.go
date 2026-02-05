@@ -289,6 +289,8 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 
 	status := map[string]interface{}{
 		"vip":            cfg.LAN.VIP,
+		"cidr":           cfg.LAN.CIDR,
+		"iface":          cfg.LAN.Iface,
 		"current_master": currentMaster,
 		"routers":        routers,
 	}
@@ -306,12 +308,16 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 	case http.MethodPut:
 		var update struct {
 			LAN struct {
-				VIP  string `json:"vip"`
-				CIDR string `json:"cidr"`
+				VIP   string `json:"vip"`
+				CIDR  string `json:"cidr"`
+				Iface string `json:"iface"`
 			} `json:"lan"`
 			Keepalived struct {
 				VRID int `json:"vrid"`
 			} `json:"keepalived"`
+			Health struct {
+				Mode string `json:"mode"`
+			} `json:"health"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&update); err != nil {
 			writeError(w, http.StatusBadRequest, err)
@@ -325,8 +331,14 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 		if update.LAN.CIDR != "" {
 			cfg.LAN.CIDR = update.LAN.CIDR
 		}
+		if update.LAN.Iface != "" {
+			cfg.LAN.Iface = update.LAN.Iface
+		}
 		if update.Keepalived.VRID != 0 {
 			cfg.Keepalived.VRID = update.Keepalived.VRID
+		}
+		if update.Health.Mode != "" {
+			cfg.Health.Mode = config.HealthMode(update.Health.Mode)
 		}
 
 		s.manager.SaveConfig()

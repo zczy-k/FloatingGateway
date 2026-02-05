@@ -22,9 +22,9 @@ const indexHTML = `<!DOCTYPE html>
         <header>
             <h1>浮动网关 (Floating Gateway)</h1>
             <div id="vip-status">
-                <span class="label">虚拟网关 IP (VIP):</span>
+                <span class="label">虚拟 IP (VIP):</span>
                 <span id="vip-address">-</span>
-                <span class="label">当前主控 (Master):</span>
+                <span class="label">当前主控:</span>
                 <span id="current-master">-</span>
             </div>
         </header>
@@ -34,6 +34,7 @@ const indexHTML = `<!DOCTYPE html>
                 <div class="section-header">
                     <h2>路由器管理</h2>
                     <button id="btn-add-router" class="btn btn-primary">添加路由器</button>
+                    <button id="btn-global-config" class="btn">全局设置</button>
                     <button id="btn-refresh" class="btn">刷新状态</button>
                 </div>
                 <div id="routers-grid"></div>
@@ -84,6 +85,43 @@ const indexHTML = `<!DOCTYPE html>
                     <div class="form-actions">
                         <button type="button" class="btn" onclick="closeModal('modal-add-router')">取消</button>
                         <button type="submit" class="btn btn-primary">确定添加</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+
+        <!-- Global Config Modal -->
+        <div id="modal-global-config" class="modal">
+            <div class="modal-content">
+                <h3>全局设置</h3>
+                <form id="form-global-config">
+                    <div class="form-group">
+                        <label>虚拟 IP (VIP)</label>
+                        <input type="text" name="vip" required placeholder="192.168.1.254">
+                    </div>
+                    <div class="form-group">
+                        <label>网段 (CIDR)</label>
+                        <input type="text" name="cidr" required placeholder="192.168.1.0/24">
+                        <small style="color: var(--text-muted); font-size: 0.7rem;">留空则根据网卡自动推断</small>
+                    </div>
+                    <div class="form-group">
+                        <label>网卡接口 (Interface)</label>
+                        <input type="text" name="iface" required placeholder="br-lan 或 eth0">
+                    </div>
+                    <div class="form-group">
+                        <label>虚拟路由标识 (VRID)</label>
+                        <input type="number" name="vrid" required value="51" min="1" max="255">
+                    </div>
+                    <div class="form-group">
+                        <label>检测模式 (Health Mode)</label>
+                        <select name="health_mode" required>
+                            <option value="internet">互联网模式 (检测外网)</option>
+                            <option value="basic">基础模式 (仅检测网关)</option>
+                        </select>
+                    </div>
+                    <div class="form-actions">
+                        <button type="button" class="btn" onclick="closeModal('modal-global-config')">取消</button>
+                        <button type="submit" class="btn btn-primary">保存设置</button>
                     </div>
                 </form>
             </div>
@@ -683,6 +721,22 @@ document.addEventListener('DOMContentLoaded', () => {
         openModal('modal-add-router');
     });
     
+    // Global config button
+    $('#btn-global-config').addEventListener('click', async () => {
+        try {
+            const cfg = await apiCall('/config');
+            const form = $('#form-global-config');
+            form.vip.value = cfg.lan.vip || '';
+            form.cidr.value = cfg.lan.cidr || '';
+            form.iface.value = cfg.lan.iface || '';
+            form.vrid.value = cfg.keepalived.vrid || 51;
+            form.health_mode.value = cfg.health.mode || 'internet';
+            openModal('modal-global-config');
+        } catch (e) {
+            log('获取配置失败: ' + e.message, 'error');
+        }
+    });
+    
     // Refresh button
     $('#btn-refresh').addEventListener('click', () => {
         log('正在刷新...');
@@ -714,6 +768,37 @@ document.addEventListener('DOMContentLoaded', () => {
             await refreshStatus();
         } catch (e) {
             log('添加路由器失败: ' + e.message, 'error');
+        }
+    });
+
+    // Global config form
+    $('#form-global-config').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const form = e.target;
+        const update = {
+            lan: {
+                vip: form.vip.value,
+                cidr: form.cidr.value,
+                iface: form.iface.value
+            },
+            keepalived: {
+                vrid: parseInt(form.vrid.value)
+            },
+            health: {
+                mode: form.health_mode.value
+            }
+        };
+        
+        try {
+            await apiCall('/config', {
+                method: 'PUT',
+                body: JSON.stringify(update)
+            });
+            log('全局配置已更新', 'success');
+            closeModal('modal-global-config');
+            await refreshStatus();
+        } catch (e) {
+            log('更新配置失败: ' + e.message, 'error');
         }
     });
     

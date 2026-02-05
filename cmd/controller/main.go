@@ -19,7 +19,7 @@ import (
 
 const (
 	defaultConfigPath = "controller.yaml"
-	version           = "1.0.3"
+	version           = "1.0.4"
 )
 
 func main() {

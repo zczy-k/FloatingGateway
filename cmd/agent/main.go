@@ -21,7 +21,7 @@ import (
 
 const (
 	defaultConfigPath = "/etc/gateway-agent/config.yaml"
-	version           = "1.0.3"
+	version           = "1.0.4"
 )
 
 func main() {
