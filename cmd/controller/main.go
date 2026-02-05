@@ -17,13 +17,14 @@ import (
 
 const (
 	defaultConfigPath = "controller.yaml"
-	version           = "1.0.0"
+	version           = "1.0.1"
 )
 
 func main() {
 	if len(os.Args) < 2 {
-		printUsage()
-		os.Exit(1)
+		// Default to serve for Windows double-click support
+		serveCmd([]string{})
+		return
 	}
 
 	switch os.Args[1] {
