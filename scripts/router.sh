@@ -772,7 +772,43 @@ HELPEOF
 }
 
 # ============== 主入口 ==============
+show_menu() {
+    clear
+    echo "=========================================="
+    echo "    Gateway Agent 管理工具 (v1.0.1)"
+    echo "=========================================="
+    echo "  1) 安装 / 升级 Gateway Agent"
+    echo "  2) 查看运行状态 / 诊断 (status)"
+    echo "  3) 运行自检 (doctor)"
+    echo "  4) 卸载 Gateway Agent (清理残留)"
+    echo "  0) 退出"
+    echo "------------------------------------------"
+    printf "请选择 [0-4]: "
+    read -r choice
+    echo ""
+
+    case "$choice" in
+        1) interactive_install ;;
+        2) do_status ;;
+        3) 
+            if [ -x "$INSTALL_DIR/gateway-agent" ]; then
+                "$INSTALL_DIR/gateway-agent" doctor -c "$CONFIG_FILE"
+            else
+                error "Agent 未安装"
+            fi
+            ;;
+        4) do_uninstall ;;
+        0) exit 0 ;;
+        *) warn "无效选项"; sleep 1; show_menu ;;
+    esac
+}
+
 main() {
+    if [ $# -eq 0 ] && [ -t 0 ]; then
+        show_menu
+        return
+    fi
+
     parse_args "$@"
     
     detect_platform
@@ -785,11 +821,7 @@ main() {
             do_status
             ;;
         install|"")
-            if [ "$INTERACTIVE" = "true" ] && [ -t 0 ]; then
-                interactive_install
-            else
-                do_install
-            fi
+            do_install
             ;;
         *)
             error "未知操作: $ACTION"

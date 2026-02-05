@@ -22,7 +22,7 @@ Thumbs.db
 *.test
 coverage.out
 
-# Local config
-controller.yaml
-config.yaml
+# Local config (root directory only, not examples/)
+/controller.yaml
+/config.yaml
 *.local.yaml

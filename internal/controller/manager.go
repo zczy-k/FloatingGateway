@@ -87,15 +87,21 @@ func NewManager(configPath string) (*Manager, error) {
 
 // loadConfig loads the controller configuration.
 func (m *Manager) loadConfig() error {
-	data, err := os.ReadFile(m.configPath)
-	if err != nil {
-		return fmt.Errorf("read config: %w", err)
-	}
-
 	cfg := &ControllerConfig{
 		Version: 1,
 		Listen:  ":8080",
 	}
+
+	data, err := os.ReadFile(m.configPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			// No config file, use defaults
+			m.config = cfg
+			return nil
+		}
+		return fmt.Errorf("read config: %w", err)
+	}
+
 	if err := yaml.Unmarshal(data, cfg); err != nil {
 		return fmt.Errorf("parse config: %w", err)
 	}

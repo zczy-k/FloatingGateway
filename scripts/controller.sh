@@ -490,8 +490,39 @@ EOF
 }
 
 # ============== 主入口 ==============
+show_menu() {
+    clear
+    printf "${BLUE}===============================================${NC}\n"
+    printf "${BLUE}      Gateway Controller 管理工具 (v1.0.1)      ${NC}\n"
+    printf "${BLUE}===============================================${NC}\n"
+    printf "  1) 安装 / 升级 Controller\n"
+    printf "  2) 启动 Controller 服务\n"
+    printf "  3) 停止 Controller 服务\n"
+    printf "  4) 查看服务状态 / 诊断\n"
+    printf "  5) 卸载 Controller (清理残留)\n"
+    printf "  0) 退出\n"
+    printf "${BLUE}-----------------------------------------------${NC}\n"
+    printf "请选择数字 [0-5]: "
+    read -r choice
+
+    case "$choice" in
+        1) do_install ;;
+        2) do_start ;;
+        3) do_stop ;;
+        4) do_status ;;
+        5) do_uninstall ;;
+        0) exit 0 ;;
+        *) warn "无效选项，请重试"; sleep 1; show_menu ;;
+    esac
+}
+
 main() {
-    case "${1:-help}" in
+    if [ -z "$1" ]; then
+        show_menu
+        return
+    fi
+
+    case "$1" in
         install)
             do_install
             ;;

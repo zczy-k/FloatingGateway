@@ -292,12 +292,45 @@ Gateway Controller Windows 安装脚本
 }
 
 # ============== 主入口 ==============
-switch ($Action) {
-    "install"   { Install-Controller }
-    "uninstall" { Uninstall-Controller }
-    "start"     { Start-Controller }
-    "stop"      { Stop-Controller }
-    "status"    { Get-ControllerStatus }
-    "help"      { Show-Help }
-    default     { Show-Help }
+function Show-Menu {
+    Clear-Host
+    Write-Host "===============================================" -ForegroundColor Cyan
+    Write-Host "      Gateway Controller 管理工具 (v1.0.1)" -ForegroundColor Cyan
+    Write-Host "===============================================" -ForegroundColor Cyan
+    Write-Host "  1) 安装 / 升级 Controller"
+    Write-Host "  2) 启动 Controller (后台运行)"
+    Write-Host "  3) 停止 Controller"
+    Write-Host "  4) 查看服务状态 / 诊断"
+    Write-Host "  5) 卸载 Controller (清理残留)"
+    Write-Host "  0) 退出"
+    Write-Host "-----------------------------------------------" -ForegroundColor Cyan
+    $choice = Read-Host "请选择数字 [0-5]"
+
+    switch ($choice) {
+        "1" { Install-Controller }
+        "2" { Start-Controller }
+        "3" { Stop-Controller }
+        "4" { Get-ControllerStatus }
+        "5" { Uninstall-Controller }
+        "0" { exit 0 }
+        default { Write-Log "无效选项，请重试" "WARN"; Start-Sleep -Seconds 1; Show-Menu }
+    }
+}
+
+# 检查命令行参数
+$ActionProvided = $MyInvocation.BoundParameters.ContainsKey('Action') -or $args.Count -gt 0
+
+if (-not $ActionProvided) {
+    Show-Menu
+}
+else {
+    switch ($Action) {
+        "install"   { Install-Controller }
+        "uninstall" { Uninstall-Controller }
+        "start"     { Start-Controller }
+        "stop"      { Stop-Controller }
+        "status"    { Get-ControllerStatus }
+        "help"      { Show-Help }
+        default     { Show-Help }
+    }
 }

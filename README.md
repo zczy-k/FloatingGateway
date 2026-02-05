@@ -1,132 +1,133 @@
-# Floating Gateway
+# 🏠 Floating Gateway (浮动网关)
 
-双路由器 VIP 浮动网关系统，使用 VRRP (Keepalived) 实现自动故障切换。
+[![GitHub Release](https://img.shields.io/github/v/release/youruser/floatip)](../../releases)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-## 功能
+**Floating Gateway** 是一个为家庭网络设计的双路由器高可用方案。它通过 **VRRP (虚拟路由冗余协议)** 技术，在你的主路由（Primary）和旁路由（Secondary）之间建立一个 **VIP (虚拟网关 IP)**。
 
-- **自动故障切换**: Secondary 路由器国际链路故障时，VIP 自动漂移到 Primary
-- **健康检查**: 支持 Ping/DNS/TCP/HTTP 多种检查方式，带防抖逻辑
-- **集中管理**: Web UI + REST API，通过 SSH 推送配置到路由器
-- **多平台支持**: OpenWrt (procd) / Ubuntu (systemd)
+当你的旁路由（出口网关）健康时，它持有 VIP 并处理所有流量；一旦检测到旁路由的国际链路故障或宕机，VIP 会自动秒级漂移到主路由，确保网络始终可用。
 
-## 架构
+---
 
-```
-┌─────────────────┐
-│   Controller    │  ← 管理端 (Web UI)
-└────────┬────────┘
-         │ SSH
-    ┌────┴────┐
-    ↓         ↓
-┌───────┐ ┌───────┐
-│Primary│ │Second.│  ← 路由器 (gateway-agent + keepalived)
-└───┬───┘ └───┬───┘
-    │   VIP   │
-    └────┬────┘
-         ↓
-    LAN Clients
-```
+## 🌟 核心特性
 
-## 快速开始
+- **🚀 自动故障切换**: 无需手动修改任何设备网关，故障时自动切换，恢复时自动抢占。
+- **🔍 智能健康检测**: 内置 Ping、DNS、TCP、HTTP 四种检测，支持 `basic`（连通性）和 `internet`（国际链路）模式。
+- **🛡️ 极致稳定性**: 基于成熟的 Keepalived 核心，结合 Go 语言编写的防抖策略（k-of-n 判定）。
+- **🖥️ 可视化管理**: 提供跨平台 Web 控制台，支持 Windows、macOS、Linux 甚至 OpenWrt。
+- **🛠️ 零配置部署**: 支持 Windows 自动弹窗、一键安装/卸载脚本、SSH 批量部署。
 
-### 方式 1: 使用 Controller (推荐)
+---
 
-1. 从 [Releases](../../releases) 下载 `gateway-controller`
-2. 创建 `controller.yaml`:
-```yaml
-version: 1
-listen: ":8080"
-lan:
-  vip: 192.168.1.1
-  cidr: 192.168.1.0/24
-keepalived:
-  vrid: 51
-routers:
-  - name: openwrt
-    host: 192.168.1.2
-    user: root
-    key_file: ~/.ssh/id_rsa
-    role: primary
-  - name: ubuntu
-    host: 192.168.1.3
-    user: root
-    key_file: ~/.ssh/id_rsa
-    role: secondary
-```
-3. 启动: `./gateway-controller serve`
-4. 打开 http://localhost:8080 点击 "Install" 安装 Agent
+## 🚀 快速安装 (新手推荐)
 
-### 方式 2: 手动安装 Agent
+### 1. 准备工作
+- **两台设备**: 
+    - **Primary (A)**: 通常是你的主路由 (OpenWrt)。
+    - **Secondary (B)**: 你的旁路由 (Ubuntu/Debian 或 OpenWrt)。
+- **SSH 权限**: 确保两台设备都开启了 SSH 并允许 root 登录。
 
-在路由器上执行:
+### 2. 运行控制台 (Management Center)
+控制台是你管理整个系统的中心，建议运行在你的常用电脑或 7x24 小时运行的服务器上。
+
+#### **Windows (最简单)**
+1. 从 [Releases](../../releases) 下载 `gateway-controller-windows-amd64.exe`。
+2. **直接双击运行**。
+3. 程序会自动打开浏览器，访问 `http://localhost:8080`。
+
+#### **Linux / macOS**
+使用一键交互脚本：
 ```bash
-# 下载 (替换为实际 URL)
-wget https://github.com/youruser/floatip/releases/latest/download/gateway-agent-linux-arm64
-chmod +x gateway-agent-linux-arm64
-mv gateway-agent-linux-arm64 /usr/bin/gateway-agent
+# 下载脚本
+curl -O https://raw.githubusercontent.com/youruser/floatip/main/setup.sh
+chmod +x setup.sh
 
-# 配置
+# 运行并选择 "1) [管理端] Gateway Controller"
+./setup.sh
+```
+
+### 3. 在 Web UI 中部署
+1. **添加节点**: 在网页中填写 A 和 B 的 IP、用户名、密码。
+2. **设置 VIP**: 建议设置一个未被占用的 IP（如 `192.168.1.254`）。
+3. **点击 Install**: 剩下的事情（安装依赖、同步配置、启动服务）交给系统自动处理。
+
+---
+
+## 🛠️ 进阶：手动安装 Agent
+
+如果你不想使用 Web UI，也可以手动在路由器上安装。
+
+### 1. 使用交互式脚本 (推荐)
+在 A 和 B 路由器上分别运行：
+```bash
+curl -O https://raw.githubusercontent.com/youruser/floatip/main/setup.sh
+chmod +x setup.sh
+./setup.sh
+# 选择 "2) [路由器] Gateway Agent"
+```
+脚本会引导你完成角色选择（Primary/Secondary）和网络配置。
+
+### 2. 命令行部署
+```bash
+# 生成配置文件 (以 Secondary 为例)
 mkdir -p /etc/gateway-agent
 cat > /etc/gateway-agent/config.yaml << EOF
 version: 1
 role: secondary
 lan:
   iface: eth0
-  vip: 192.168.1.1
+  vip: 192.168.1.254
 routers:
-  peer_ip: 192.168.1.2
+  peer_ip: 192.168.1.1
 health:
   mode: internet
 EOF
 
-# 应用并启动
+# 应用配置并启动
 gateway-agent apply
 gateway-agent run
 ```
 
-## 编译
+---
 
+## 📊 验证与排障
+
+### 1. 如何确认部署成功？
+- **观察 VIP**: 在路由器上运行 `ip addr show`，应能在网卡上看到你设置的 VIP。
+- **测试切换**: 
+    1. 在电脑上将网关设为 **VIP**。
+    2. 停止 Secondary 的服务 (`gateway-agent stop`)。
+    3. 运行 `ping 223.5.5.5`，确认网络在短暂波动后恢复。
+
+### 2. 常见问题 (FAQ)
+- **Q: VIP 无法漂移？**
+  A: 检查两台路由器防火墙是否允许 VRRP 协议（协议号 112）。
+- **Q: 为什么状态显示 Unhealthy？**
+  A: 运行 `gateway-agent doctor` 进行自检，查看具体的检测失败原因。
+- **Q: 客户端需要改设置吗？**
+  A: 验证通过后，将你主路由 DHCP 的“默认网关”改为 **VIP** 即可。
+
+---
+
+## 🏗️ 开发者指南
+
+### 编译项目
 ```bash
-# 本地编译
-go build -o gateway-agent ./cmd/agent
-go build -o gateway-controller ./cmd/controller
-
-# 交叉编译 (Linux ARM64)
-GOOS=linux GOARCH=arm64 go build -o gateway-agent-linux-arm64 ./cmd/agent
+# 交叉编译所有平台
+./scripts/build.sh
 ```
 
-或推送 tag 到 GitHub 自动编译:
-```bash
-git tag v1.0.0
-git push origin v1.0.0
-```
+### 目录结构
+- `cmd/`: 命令行入口 (Agent & Controller)
+- `internal/`: 核心业务逻辑 (健康检查、VRRP 模板、平台适配)
+- `scripts/`: 各平台安装/卸载/管理脚本
+- `examples/`: 典型场景配置模板
 
-## 配置说明
+---
 
-详见 [examples/](examples/) 目录:
-- `config-primary.yaml` - Primary 路由器配置
-- `config-secondary.yaml` - Secondary 路由器配置  
-- `controller.yaml` - Controller 配置
+## 📜 许可证
 
-## 命令
+本项目采用 [MIT License](LICENSE) 开源。
 
-### gateway-agent (路由器端)
-```
-run       运行守护进程
-check     单次健康检查 (供 keepalived 调用)
-apply     生成并应用 keepalived 配置
-doctor    自检
-status    状态查看
-```
-
-### gateway-controller (管理端)
-```
-serve     启动 Web UI
-probe     探测路由器状态
-install   安装 Agent
-status    查看状态
-```
-
-## License
-
-MIT
+---
+*如果有任何问题或建议，欢迎提交 Issue 或 Pull Request！*

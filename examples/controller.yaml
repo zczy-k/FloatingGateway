@@ -1,0 +1,45 @@
+# Example configuration for gateway-controller
+# This file is used by the controller to manage multiple routers.
+#
+# Place in: ./controller.yaml or specify with -c flag
+
+version: 1
+
+# HTTP server listen address
+listen: ":8080"
+
+# Path to gateway-agent binary (for remote installation)
+# The controller will look for architecture-specific binaries:
+#   gateway-agent-linux-amd64, gateway-agent-linux-arm64, etc.
+agent_bin: "./dist/gateway-agent-linux-amd64"
+
+# Shared LAN configuration
+lan:
+  # Virtual IP address used by both routers
+  vip: 192.168.1.1
+  # Network CIDR
+  cidr: 192.168.1.0/24
+
+keepalived:
+  # Virtual Router ID (must be unique on the network)
+  vrid: 51
+
+# Managed routers
+routers:
+  # Primary router (OpenWrt) - backup gateway
+  - name: openwrt-main
+    host: 192.168.1.2
+    port: 22
+    user: root
+    password: ""  # Leave empty if using key-based auth
+    key_file: ~/.ssh/id_rsa
+    role: primary
+
+  # Secondary router (Ubuntu/Linux) - preferred gateway
+  - name: ubuntu-gateway
+    host: 192.168.1.3
+    port: 22
+    user: root
+    password: ""
+    key_file: ~/.ssh/id_rsa
+    role: secondary

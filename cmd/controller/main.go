@@ -6,9 +6,13 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 
 	"github.com/floatip/gateway/internal/controller"
+	"os/exec"
+	"runtime"
+	"time"
 )
 
 const (
@@ -51,7 +55,7 @@ Usage:
   gateway-controller <command> [options]
 
 Commands:
-  serve       Start the web UI and API server
+  serve       Start the web UI and API server (opens browser automatically)
   probe       Probe all routers for status
   install     Install agent on routers
   uninstall   Uninstall agent from routers
@@ -81,12 +85,18 @@ func serveCmd(args []string) {
 	configPath := fs.String("c", defaultConfigPath, "config file path")
 	fs.StringVar(configPath, "config", defaultConfigPath, "config file path")
 	listen := fs.String("listen", "", "listen address (overrides config)")
+	noBrowser := fs.Bool("no-browser", false, "don't open browser automatically")
 	fs.Parse(args)
 
 	manager, err := loadManager(*configPath)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		fmt.Fprintf(os.Stderr, "Error loading config: %v\n", err)
 		os.Exit(1)
+	}
+
+	// If config file doesn't exist, it will be created on first save
+	if _, err := os.Stat(*configPath); os.IsNotExist(err) {
+		fmt.Printf("Config file %s not found. Starting in setup mode (defaults: :8080)\n", *configPath)
 	}
 
 	// Determine listen address
@@ -99,7 +109,27 @@ func serveCmd(args []string) {
 	}
 
 	fmt.Printf("Starting gateway-controller on %s\n", addr)
-	fmt.Println("Open http://localhost" + addr + " in your browser")
+
+	// Determine the URL to open
+	host := "localhost"
+	port := addr
+	if strings.Contains(addr, ":") {
+		parts := strings.Split(addr, ":")
+		if parts[0] != "" {
+			host = parts[0]
+		}
+		port = ":" + parts[1]
+	}
+	url := fmt.Sprintf("http://%s%s", host, port)
+	fmt.Printf("Open %s in your browser\n", url)
+
+	// Open browser in background if requested
+	if !*noBrowser {
+		go func() {
+			time.Sleep(500 * time.Millisecond) // Wait a bit for server to start
+			openBrowser(url)
+		}()
+	}
 
 	// Setup signal handling
 	sigCh := make(chan os.Signal, 1)
@@ -116,6 +146,23 @@ func serveCmd(args []string) {
 	if err := server.Start(addr); err != nil {
 		fmt.Fprintf(os.Stderr, "Server error: %v\n", err)
 		os.Exit(1)
+	}
+}
+
+func openBrowser(url string) {
+	var err error
+	switch runtime.GOOS {
+	case "linux":
+		err = exec.Command("xdg-open", url).Start()
+	case "windows":
+		err = exec.Command("rundll32", "url.dll,FileProtocolHandler", url).Start()
+	case "darwin":
+		err = exec.Command("open", url).Start()
+	default:
+		err = fmt.Errorf("unsupported platform")
+	}
+	if err != nil {
+		fmt.Printf("Failed to open browser: %v\n", err)
 	}
 }
 
