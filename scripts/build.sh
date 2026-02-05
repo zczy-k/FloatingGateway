@@ -3,9 +3,9 @@
 
 set -e
 
-VERSION="${VERSION:-1.0.0}"
+VERSION="${VERSION:-1.0.4}"
 OUTPUT_DIR="${OUTPUT_DIR:-dist}"
-MODULE="github.com/floatip/gateway"
+MODULE="github.com/zczy-k/FloatingGateway"
 
 # Target platforms
 TARGETS=(

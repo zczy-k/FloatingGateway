@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/floatip/gateway/internal/platform/exec"
+	"github.com/zczy-k/FloatingGateway/internal/platform/exec"
 )
 
 // InterfaceInfo holds information about a network interface.
@@ -272,6 +272,42 @@ func RemoveVIP(vip, iface string) error {
 		return fmt.Errorf("remove VIP failed: %s", result.Combined())
 	}
 	return fmt.Errorf("ip command not found")
+}
+
+// DetectPrimaryInterface attempts to find the main network interface (with default route).
+func DetectPrimaryInterface() (string, error) {
+	// Method 1: ip route get 8.8.8.8
+	if exec.CommandExists("ip") {
+		result := exec.RunWithTimeout("ip", 5*time.Second, "route", "get", "8.8.8.8")
+		if result.Success() {
+			// Output example: 8.8.8.8 via 192.168.1.1 dev eth0 src 192.168.1.10 ...
+			fields := strings.Fields(result.Stdout)
+			for i, f := range fields {
+				if f == "dev" && i+1 < len(fields) {
+					return fields[i+1], nil
+				}
+			}
+		}
+
+		// Method 2: ip route show default
+		result = exec.RunWithTimeout("ip", 5*time.Second, "route", "show", "default")
+		if result.Success() {
+			fields := strings.Fields(result.Stdout)
+			for i, f := range fields {
+				if f == "dev" && i+1 < len(fields) {
+					return fields[i+1], nil
+				}
+			}
+		}
+	}
+
+	// Method 3: Fallback to the first non-loopback UP interface that has an IP
+	ifaces, err := GetInterfaces()
+	if err == nil && len(ifaces) > 0 {
+		return ifaces[0].Name, nil
+	}
+
+	return "", fmt.Errorf("could not detect primary interface")
 }
 
 // HasVIP checks if an interface has the specified VIP.

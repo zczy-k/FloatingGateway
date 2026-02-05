@@ -6,8 +6,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/floatip/gateway/internal/platform/detect"
-	"github.com/floatip/gateway/internal/platform/exec"
+	"github.com/zczy-k/FloatingGateway/internal/platform/detect"
+	"github.com/zczy-k/FloatingGateway/internal/platform/exec"
 )
 
 // Manager provides package management operations.

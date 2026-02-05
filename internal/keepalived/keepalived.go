@@ -10,8 +10,8 @@ import (
 	"text/template"
 	"time"
 
-	"github.com/floatip/gateway/internal/config"
-	"github.com/floatip/gateway/internal/platform/exec"
+	"github.com/zczy-k/FloatingGateway/internal/config"
+	"github.com/zczy-k/FloatingGateway/internal/platform/exec"
 )
 
 // ConfigPaths are possible keepalived config file locations.

@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/floatip/gateway/internal/config"
+	"github.com/zczy-k/FloatingGateway/internal/config"
 )
 
 func TestDebounce_FailCount(t *testing.T) {

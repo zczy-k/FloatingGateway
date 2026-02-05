@@ -20,7 +20,7 @@ $ConfigFile = "$ConfigDir\config.yaml"
 $BinaryPath = "$InstallDir\$ControllerName.exe"
 
 # 下载源
-$DownloadBase = if ($env:DOWNLOAD_BASE) { $env:DOWNLOAD_BASE } else { "https://github.com/youruser/floatip/releases/latest/download" }
+$DownloadBase = if ($env:DOWNLOAD_BASE) { $env:DOWNLOAD_BASE } else { "https://github.com/zczy-k/FloatingGateway/releases/latest/download" }
 
 # ============== 工具函数 ==============
 function Write-Log {

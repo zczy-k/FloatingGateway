@@ -6,8 +6,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/floatip/gateway/internal/config"
-	"github.com/floatip/gateway/internal/health/checks"
+	"github.com/zczy-k/FloatingGateway/internal/config"
+	"github.com/zczy-k/FloatingGateway/internal/health/checks"
 )
 
 // State represents the current health state.

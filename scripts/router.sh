@@ -90,19 +90,22 @@ detect_platform() {
 
 # ============== 网络工具函数 ==============
 
-# 获取接口列表（排除 lo, docker, veth 等）
+# 获取接口列表（优先返回默认路由接口）
 list_interfaces() {
-    ip -o link show | awk -F': ' '{print $2}' | grep -v -E '^(lo|docker|veth|br-|virbr)' | sed 's/@.*//'
+    local def_iface
+    def_iface=$(ip route get 8.8.8.8 2>/dev/null | awk '{for(i=1;i<=NF;i++)if($i=="dev")print $(i+1)}' | head -1)
+    [ -n "$def_iface" ] && echo "$def_iface"
+    ip -o link show | awk -F': ' '{print $2}' | grep -v -E '^(lo|docker|veth|br-|virbr)' | sed 's/@.*//' | grep -v "^$def_iface$"
 }
 
 # 获取接口 IPv4 地址
 get_iface_ipv4() {
-    ip -4 addr show "$1" 2>/dev/null | grep -oP 'inet \K[0-9.]+' | head -1
+    ip -4 addr show "$1" 2>/dev/null | awk '/inet /{print $2}' | cut -d/ -f1 | head -1
 }
 
 # 获取接口 CIDR
 get_iface_cidr() {
-    ip -4 addr show "$1" 2>/dev/null | grep -oP 'inet \K[0-9./]+' | head -1
+    ip -4 addr show "$1" 2>/dev/null | awk '/inet /{print $2}' | head -1
 }
 
 # 从 CIDR 提取网段
@@ -775,7 +778,7 @@ HELPEOF
 show_menu() {
     clear
     echo "=========================================="
-    echo "    Gateway Agent 管理工具 (v1.0.1)"
+    echo "    Gateway Agent 管理工具 (v1.0.5)"
     echo "=========================================="
     echo "  1) 安装 / 升级 Gateway Agent"
     echo "  2) 查看运行状态 / 诊断 (status)"

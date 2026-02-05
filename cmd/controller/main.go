@@ -10,8 +10,8 @@ import (
 	"strings"
 	"syscall"
 
-	"github.com/floatip/gateway/internal/config"
-	"github.com/floatip/gateway/internal/controller"
+	"github.com/zczy-k/FloatingGateway/internal/config"
+	"github.com/zczy-k/FloatingGateway/internal/controller"
 	"os/exec"
 	"runtime"
 	"time"
@@ -19,7 +19,7 @@ import (
 
 const (
 	defaultConfigPath = "controller.yaml"
-	version           = "1.0.4"
+	version           = "1.0.5"
 )
 
 func main() {

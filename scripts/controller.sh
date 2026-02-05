@@ -20,7 +20,7 @@ SYSTEMD_UNIT="/etc/systemd/system/gateway-controller.service"
 LAUNCHD_PLIST="${HOME}/Library/LaunchAgents/com.floatip.gateway-controller.plist"
 
 # 下载源（需要替换为实际 URL）
-DOWNLOAD_BASE="${DOWNLOAD_BASE:-https://github.com/youruser/floatip/releases/latest/download}"
+DOWNLOAD_BASE="${DOWNLOAD_BASE:-https://github.com/zczy-k/FloatingGateway/releases/latest/download}"
 
 # 颜色
 RED='\033[0;31m'
@@ -493,7 +493,8 @@ EOF
 show_menu() {
     clear
     printf "${BLUE}===============================================${NC}\n"
-    printf "${BLUE}      Gateway Controller 管理工具 (v1.0.1)      ${NC}\n"
+      printf "${BLUE}      Gateway Controller 管理工具 (v1.0.5)      ${NC}\n"
+
     printf "${BLUE}===============================================${NC}\n"
     printf "  1) 安装 / 升级 Controller\n"
     printf "  2) 启动 Controller 服务\n"

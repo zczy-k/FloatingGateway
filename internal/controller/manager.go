@@ -10,7 +10,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/floatip/gateway/internal/config"
+	"github.com/zczy-k/FloatingGateway/internal/config"
 	"gopkg.in/yaml.v3"
 )
 
@@ -217,6 +217,21 @@ func (m *Manager) Probe(r *Router) error {
 	// Detect platform
 	r.Platform = m.detectPlatform(client)
 
+	// Auto-detect interface and CIDR if not set in global config
+	if m.config.LAN.Iface == "" || m.config.LAN.CIDR == "" {
+		if iface, cidr, err := m.DetectNetwork(client, r.Host); err == nil {
+			m.mu.Lock()
+			if m.config.LAN.Iface == "" {
+				m.config.LAN.Iface = iface
+			}
+			if m.config.LAN.CIDR == "" {
+				m.config.LAN.CIDR = cidr
+			}
+			m.mu.Unlock()
+			m.SaveConfig()
+		}
+	}
+
 	// Check agent version
 	if ver, err := client.RunCombined("gateway-agent version 2>/dev/null"); err == nil {
 		r.AgentVer = strings.TrimSpace(ver)
@@ -257,6 +272,62 @@ func (m *Manager) detectPlatform(client *SSHClient) Platform {
 	}
 
 	return PlatformUnknown
+}
+
+// DetectNetwork tries to find the interface and CIDR for a given IP on the remote host.
+func (m *Manager) DetectNetwork(client *SSHClient, targetIP string) (iface, cidr string, err error) {
+	// Try to get default interface
+	out, err := client.RunCombined("ip route get 8.8.8.8")
+	if err != nil || out == "" {
+		out, err = client.RunCombined("ip route show default | head -n 1")
+	}
+
+	if err == nil && out != "" {
+		fields := strings.Fields(out)
+		for i, f := range fields {
+			if f == "dev" && i+1 < len(fields) {
+				iface = fields[i+1]
+				break
+			}
+		}
+	}
+
+	// If still empty, try to find interface containing the target IP
+	if iface == "" {
+		out, _ = client.RunCombined(fmt.Sprintf("ip -4 addr show to %s", targetIP))
+		if out != "" {
+			re := regexp.MustCompile(`\d+:\s+(\S+):?`)
+			matches := re.FindStringSubmatch(out)
+			if len(matches) > 1 {
+				iface = matches[1]
+			}
+		}
+	}
+
+	if iface != "" {
+		// Get CIDR for this interface
+		out, err = client.RunCombined(fmt.Sprintf("ip -4 addr show dev %s", iface))
+		if err == nil && out != "" {
+			re := regexp.MustCompile(`inet\s+([0-9./]+)`)
+			matches := re.FindStringSubmatch(out)
+			if len(matches) > 1 {
+				cidrFull := matches[1]
+				parts := strings.Split(cidrFull, "/")
+				if len(parts) == 2 {
+					ipDots := strings.Split(parts[0], ".")
+					if len(ipDots) == 4 {
+						cidr = fmt.Sprintf("%s.%s.%s.0/%s", ipDots[0], ipDots[1], ipDots[2], parts[1])
+					}
+				}
+			}
+		}
+	}
+
+	if iface == "" || cidr == "" {
+		return "", "", fmt.Errorf("自动探测失败，请手动输入")
+	}
+
+	return iface, cidr, nil
 }
 
 // ProbeAll probes all routers concurrently.
@@ -341,8 +412,86 @@ func (m *Manager) Install(r *Router, agentConfig *config.Config) error {
 		return fmt.Errorf("setup service: %w", err)
 	}
 
+	// Setup firewall
+	if err := m.setupFirewall(client, platform); err != nil {
+		// Log but don't fail, as some platforms might not have firewall enabled
+		fmt.Printf("Warning: setup firewall for %s failed: %v\n", r.Name, err)
+	}
+
 	r.Status = StatusOnline
 	return nil
+}
+
+// setupFirewall configures firewall to allow VRRP.
+func (m *Manager) setupFirewall(client *SSHClient, platform Platform) error {
+	switch platform {
+	case PlatformOpenWrt:
+		// Add traffic rule for VRRP (protocol 112)
+		rules := []string{
+			"uci delete firewall.vrrp 2>/dev/null",
+			"uci set firewall.vrrp=rule",
+			"uci set firewall.vrrp.name='Allow-VRRP'",
+			"uci set firewall.vrrp.src='lan'",
+			"uci set firewall.vrrp.dest='*'",
+			"uci set firewall.vrrp.proto='112'",
+			"uci set firewall.vrrp.target='ACCEPT'",
+			"uci commit firewall",
+			"/etc/init.d/firewall restart",
+		}
+		for _, cmd := range rules {
+			client.RunCombined(cmd)
+		}
+		return nil
+
+	case PlatformLinux:
+		// Try UFW
+		if _, err := client.RunCombined("which ufw"); err == nil {
+			client.RunCombined("ufw allow proto vrrp")
+			return nil
+		}
+		// Try firewalld
+		if _, err := client.RunCombined("which firewall-cmd"); err == nil {
+			client.RunCombined("firewall-cmd --permanent --add-rich-rule='rule protocol value=\"vrrp\" accept'")
+			client.RunCombined("firewall-cmd --reload")
+			return nil
+		}
+		// Try iptables directly
+		client.RunCombined("iptables -I INPUT -p vrrp -j ACCEPT")
+		return nil
+	}
+	return nil
+}
+
+// Doctor runs a remote diagnostic on the router and returns the report.
+func (m *Manager) Doctor(r *Router) (string, error) {
+	client := NewSSHClient(m.sshConfig(r))
+	if err := client.Connect(); err != nil {
+		return "", fmt.Errorf("connect: %w", err)
+	}
+	defer client.Close()
+
+	// Run doctor and get JSON output
+	output, err := client.RunCombined("gateway-agent doctor --json")
+	if err != nil {
+		return "", fmt.Errorf("run doctor: %w (output: %s)", err, output)
+	}
+
+	return output, nil
+}
+
+// CheckVIPConflict checks if the VIP is currently reachable on the network.
+func (m *Manager) CheckVIPConflict(vip string) (bool, error) {
+	// Use ping to check if VIP is reachable
+	// We use -c 1 and a short timeout
+	cmd := "ping"
+	args := []string{"-c", "1", "-W", "1", vip}
+	if runtime.GOOS == "windows" {
+		args = []string{"-n", "1", "-w", "1000", vip}
+	}
+
+	_, err := exec.Command(cmd, args...).CombinedOutput()
+	// If err is nil, it means ping succeeded (VIP is reachable)
+	return err == nil, nil
 }
 
 // findAgentBinary finds the appropriate agent binary.
@@ -403,10 +552,17 @@ func (m *Manager) installKeepalived(client *SSHClient, platform Platform) error 
 
 	switch platform {
 	case PlatformOpenWrt:
+		// Try install directly first, then try update if it fails
+		if _, err := client.RunCombined("opkg install keepalived"); err == nil {
+			return nil
+		}
 		_, err := client.RunCombined("opkg update && opkg install keepalived")
 		return err
 	case PlatformLinux:
 		// Try apt first, then yum
+		if _, err := client.RunCombined("apt-get install -y keepalived"); err == nil {
+			return nil
+		}
 		if _, err := client.RunCombined("apt-get update && apt-get install -y keepalived"); err == nil {
 			return nil
 		}

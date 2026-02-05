@@ -11,17 +11,17 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/floatip/gateway/internal/config"
-	"github.com/floatip/gateway/internal/doctor"
-	"github.com/floatip/gateway/internal/health/policy"
-	"github.com/floatip/gateway/internal/keepalived"
-	"github.com/floatip/gateway/internal/platform/detect"
-	"github.com/floatip/gateway/internal/platform/netutil"
+	"github.com/zczy-k/FloatingGateway/internal/config"
+	"github.com/zczy-k/FloatingGateway/internal/doctor"
+	"github.com/zczy-k/FloatingGateway/internal/health/policy"
+	"github.com/zczy-k/FloatingGateway/internal/keepalived"
+	"github.com/zczy-k/FloatingGateway/internal/platform/detect"
+	"github.com/zczy-k/FloatingGateway/internal/platform/netutil"
 )
 
 const (
 	defaultConfigPath = "/etc/gateway-agent/config.yaml"
-	version           = "1.0.4"
+	version           = "1.0.5"
 )
 
 func main() {
@@ -45,6 +45,8 @@ func main() {
 		statusCmd(os.Args[2:])
 	case "notify":
 		notifyCmd(os.Args[2:])
+	case "detect-iface":
+		detectIfaceCmd(os.Args[2:])
 	case "version":
 		fmt.Printf("gateway-agent %s\n", version)
 	case "help", "-h", "--help":
@@ -70,6 +72,7 @@ Commands:
   doctor    Run self-diagnosis checks
   status    Show current status
   notify    Handle keepalived state notifications
+  detect-iface Detect primary network interface
   version   Print version information
 
 Options:
@@ -425,4 +428,13 @@ func notifyCmd(args []string) {
 	default:
 		fmt.Printf("Unknown state: %s\n", state)
 	}
+}
+
+func detectIfaceCmd(args []string) {
+	iface, err := netutil.DetectPrimaryInterface()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Println(iface)
 }

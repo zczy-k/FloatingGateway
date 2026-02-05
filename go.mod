@@ -1,4 +1,4 @@
-module github.com/floatip/gateway
+module github.com/zczy-k/FloatingGateway
 
 go 1.21
 

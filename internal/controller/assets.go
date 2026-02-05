@@ -45,8 +45,22 @@ const indexHTML = `<!DOCTYPE html>
                 <div id="logs"></div>
             </section>
         </main>
+    
+        <!-- Doctor Report Modal -->
+        <div id="modal-doctor" class="modal">
+            <div class="modal-content" style="max-width: 600px;">
+                <h3>诊断报告</h3>
+                <div id="doctor-report" style="max-height: 400px; overflow-y: auto; font-size: 0.85rem;">
+                    <div class="loading">正在获取报告...</div>
+                </div>
+                <div class="form-actions">
+                    <button type="button" class="btn btn-primary" onclick="closeModal('modal-doctor')">关闭</button>
+                </div>
+            </div>
+        </div>
 
         <!-- Add Router Modal -->
+
         <div id="modal-add-router" class="modal">
             <div class="modal-content">
                 <h3>添加路由器</h3>
@@ -55,10 +69,14 @@ const indexHTML = `<!DOCTYPE html>
                         <label>名称</label>
                         <input type="text" name="name" required placeholder="例如: openwrt-main">
                     </div>
-                    <div class="form-group">
-                        <label>主机地址 (IP)</label>
-                        <input type="text" name="host" required placeholder="192.168.1.1">
-                    </div>
+                      <div class="form-group">
+                          <label>主机地址 (IP)</label>
+                          <div style="display: flex; gap: 0.5rem;">
+                              <input type="text" name="host" required placeholder="192.168.1.1">
+                              <button type="button" class="btn btn-sm" id="btn-router-probe">探测</button>
+                          </div>
+                      </div>
+
                     <div class="form-group">
                         <label>SSH 端口</label>
                         <input type="number" name="port" value="22">
@@ -101,7 +119,10 @@ const indexHTML = `<!DOCTYPE html>
                     </div>
                     <div class="form-group">
                         <label>网段 (CIDR)</label>
-                        <input type="text" name="cidr" required placeholder="192.168.1.0/24">
+                        <div style="display: flex; gap: 0.5rem;">
+                            <input type="text" name="cidr" required placeholder="192.168.1.0/24">
+                            <button type="button" class="btn btn-sm" id="btn-detect-net">自动获取</button>
+                        </div>
                         <small style="color: var(--text-muted); font-size: 0.7rem;">留空则根据网卡自动推断</small>
                     </div>
                     <div class="form-group">
@@ -166,322 +187,38 @@ header {
     border-bottom: 1px solid var(--border);
 }
 
-header h1 {
-    font-size: 1.5rem;
-    font-weight: 600;
-}
-
-#vip-status {
-    display: flex;
-    align-items: center;
-    gap: 0.75rem;
-    font-size: 0.9rem;
-}
-
-#vip-status .label {
-    color: var(--text-muted);
-}
-
-#vip-address, #current-master {
-    font-family: monospace;
-    background: var(--bg-input);
-    padding: 0.25rem 0.5rem;
-    border-radius: 4px;
-}
-
-main {
-    max-width: 1400px;
-    margin: 0 auto;
-    padding: 2rem;
-}
-
-section {
-    margin-bottom: 2rem;
-}
-
-.section-header {
-    display: flex;
-    align-items: center;
-    gap: 1rem;
-    margin-bottom: 1rem;
-}
-
-.section-header h2 {
-    font-size: 1.25rem;
-    font-weight: 500;
-}
-
-.btn {
-    background: var(--bg-input);
-    color: var(--text);
-    border: 1px solid var(--border);
-    padding: 0.5rem 1rem;
-    border-radius: 6px;
-    cursor: pointer;
-    font-size: 0.875rem;
-    transition: all 0.2s;
-}
-
-.btn:hover {
-    background: var(--border);
-}
-
-.btn-primary {
-    background: var(--primary);
-    color: var(--bg);
-    border-color: var(--primary);
-}
-
-.btn-primary:hover {
-    opacity: 0.9;
-}
-
-.btn-danger {
-    background: var(--danger);
-    color: white;
-    border-color: var(--danger);
-}
-
-.btn-sm {
-    padding: 0.25rem 0.5rem;
-    font-size: 0.75rem;
-}
-
-#routers-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
-    gap: 1rem;
-}
-
-.router-card {
+.setup-guide {
     background: var(--bg-card);
     border: 1px solid var(--border);
     border-radius: 8px;
-    padding: 1.25rem;
+    padding: 2rem;
+    max-width: 600px;
+    margin: 0 auto;
 }
 
-.router-card.master {
-    border-color: var(--success);
-    box-shadow: 0 0 0 1px var(--success);
-}
-
-.router-card-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: flex-start;
+.setup-guide h3 {
     margin-bottom: 1rem;
-}
-
-.router-name {
-    font-size: 1.1rem;
-    font-weight: 500;
-}
-
-.router-role {
-    font-size: 0.75rem;
-    padding: 0.2rem 0.5rem;
-    border-radius: 4px;
-    background: var(--bg-input);
-}
-
-.router-role.primary {
-    color: var(--warning);
-}
-
-.router-role.secondary {
     color: var(--primary);
 }
 
-.status-badge {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.35rem;
-    font-size: 0.75rem;
-    padding: 0.2rem 0.5rem;
-    border-radius: 4px;
-}
-
-.status-badge.online {
-    background: rgba(74, 222, 128, 0.15);
-    color: var(--success);
-}
-
-.status-badge.offline {
-    background: rgba(248, 113, 113, 0.15);
-    color: var(--danger);
-}
-
-.status-badge.unknown {
-    background: rgba(136, 146, 176, 0.15);
-    color: var(--text-muted);
-}
-
-.status-badge.installing, .status-badge.uninstalling {
-    background: rgba(251, 191, 36, 0.15);
-    color: var(--warning);
-}
-
-.status-dot {
-    width: 6px;
-    height: 6px;
-    border-radius: 50%;
-    background: currentColor;
-}
-
-.router-info {
-    font-size: 0.85rem;
-    color: var(--text-muted);
+.setup-guide ol {
+    margin-left: 1.5rem;
     margin-bottom: 1rem;
 }
 
-.router-info div {
-    margin-bottom: 0.35rem;
+.setup-guide li {
+    margin-bottom: 0.5rem;
+    line-height: 1.5;
 }
 
-.router-info .label {
-    display: inline-block;
-    width: 80px;
-}
-
-.router-info .value {
-    color: var(--text);
-    font-family: monospace;
-}
-
-.vrrp-state {
-    display: inline-block;
-    padding: 0.2rem 0.5rem;
-    border-radius: 4px;
-    font-size: 0.75rem;
-    font-weight: 500;
-}
-
-.vrrp-state.master {
-    background: var(--success);
-    color: var(--bg);
-}
-
-.vrrp-state.backup {
-    background: var(--text-muted);
-    color: var(--bg);
-}
-
-.health-indicator {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.35rem;
-}
-
-.health-indicator.healthy {
-    color: var(--success);
-}
-
-.health-indicator.unhealthy {
-    color: var(--danger);
-}
-
-.router-actions {
-    display: flex;
-    gap: 0.5rem;
-    flex-wrap: wrap;
-    margin-top: 1rem;
-    padding-top: 1rem;
-    border-top: 1px solid var(--border);
-}
-
-/* Modal */
-.modal {
-    display: none;
-    position: fixed;
-    top: 0;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    background: rgba(0, 0, 0, 0.7);
-    align-items: center;
-    justify-content: center;
-    z-index: 100;
-}
-
-.modal.active {
-    display: flex;
-}
-
-.modal-content {
-    background: var(--bg-card);
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    padding: 1.5rem;
-    width: 100%;
-    max-width: 400px;
-}
-
-.modal-content h3 {
-    margin-bottom: 1.25rem;
-}
-
-.form-group {
-    margin-bottom: 1rem;
-}
-
-.form-group label {
-    display: block;
-    font-size: 0.85rem;
+.loading {
+    padding: 2rem;
+    text-align: center;
     color: var(--text-muted);
-    margin-bottom: 0.35rem;
-}
-
-.form-group input,
-.form-group select {
-    width: 100%;
-    padding: 0.5rem;
-    background: var(--bg-input);
-    border: 1px solid var(--border);
-    border-radius: 4px;
-    color: var(--text);
-    font-size: 0.9rem;
-}
-
-.form-group input:focus,
-.form-group select:focus {
-    outline: none;
-    border-color: var(--primary);
-}
-
-.form-actions {
-    display: flex;
-    justify-content: flex-end;
-    gap: 0.5rem;
-    margin-top: 1.5rem;
-}
-
-/* Logs */
-#logs {
-    background: var(--bg-card);
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    padding: 1rem;
-    max-height: 200px;
-    overflow-y: auto;
-    font-family: monospace;
-    font-size: 0.8rem;
-}
-
-.log-entry {
-    padding: 0.25rem 0;
-    border-bottom: 1px solid var(--border);
-}
-
-.log-entry:last-child {
-    border-bottom: none;
-}
-
-.log-time {
-    color: var(--text-muted);
-    margin-right: 0.5rem;
 }
 
 .log-entry.error {
+
     color: var(--danger);
 }
 
@@ -634,7 +371,8 @@ function renderRouters() {
             '<div class="router-actions">' +
                 '<button class="btn btn-sm" onclick="probeRouter(\'' + router.name + '\')">探测</button>' +
                 (router.agent_version 
-                    ? '<button class="btn btn-sm btn-danger" onclick="uninstallRouter(\'' + router.name + '\')">卸载 Agent</button>'
+                    ? '<button class="btn btn-sm" onclick="showDoctor(\'' + router.name + '\')">诊断</button>' +
+                      '<button class="btn btn-sm btn-danger" onclick="uninstallRouter(\'' + router.name + '\')">卸载 Agent</button>'
                     : '<button class="btn btn-sm btn-primary" onclick="installRouter(\'' + router.name + '\')">安装 Agent</button>') +
                 '<button class="btn btn-sm btn-danger" onclick="deleteRouter(\'' + router.name + '\')">删除</button>' +
             '</div>';
@@ -643,11 +381,54 @@ function renderRouters() {
     });
     
     if (routers.length === 0) {
-        grid.innerHTML = '<p style="color: var(--text-muted)">暂无路由器。点击“添加路由器”开始。</p>';
+        grid.innerHTML = '<div class="setup-guide">' +
+            '<h3>欢迎使用浮动网关</h3>' +
+            '<p>看起来您还没有添加任何路由器。按照以下步骤开始：</p>' +
+            '<ol>' +
+            '<li>点击右上角的 <b>“添加路由器”</b> 分别添加您的主路由和旁路路由。</li>' +
+            '<li>在 <b>“全局设置”</b> 中配置您的虚拟 IP (VIP) 和网卡信息。</li>' +
+            '<li>点击路由器卡片上的 <b>“安装 Agent”</b> 一键部署。</li>' +
+            '</ol>' +
+            '<p style="margin-top: 1rem; font-size: 0.8rem; color: var(--text-muted)">提示：PVE 用户请确保网卡开启了 IP Anti-Spoofing 或关闭防火墙过滤以允许 VIP 通信。</p>' +
+            '</div>';
     }
 }
 
 // Router actions
+async function showDoctor(name) {
+    const reportDiv = $('#doctor-report');
+    reportDiv.innerHTML = '<div class="loading">正在获取诊断报告...</div>';
+    openModal('modal-doctor');
+    
+    try {
+        const report = await apiCall('/routers/' + name + '/doctor');
+        let html = '<div style="margin-bottom: 1rem;">' +
+            '<div><b>平台:</b> ' + report.platform + '</div>' +
+            '<div><b>角色:</b> ' + (report.role === 'primary' ? '主路由' : '旁路路由') + '</div>' +
+            '</div>';
+        
+        report.checks.forEach(check => {
+            const statusIcon = check.status === 'ok' ? '✅' : (check.status === 'warning' ? '⚠️' : '❌');
+            const statusColor = check.status === 'ok' ? 'var(--success)' : (check.status === 'warning' ? 'var(--warning)' : 'var(--danger)');
+            html += '<div style="padding: 0.5rem; border-bottom: 1px solid var(--border);">' +
+                '<div style="display: flex; justify-content: space-between;">' +
+                    '<b>' + check.name + '</b>' +
+                    '<span style="color: ' + statusColor + '">' + statusIcon + ' ' + check.status.toUpperCase() + '</span>' +
+                '</div>' +
+                '<div style="color: var(--text-muted); font-size: 0.8rem;">' + check.message + '</div>' +
+                '</div>';
+        });
+        
+        html += '<div style="margin-top: 1rem; padding: 0.75rem; background: var(--bg-input); border-radius: 4px; font-weight: bold;">' +
+            report.summary +
+            '</div>';
+            
+        reportDiv.innerHTML = html;
+    } catch (e) {
+        reportDiv.innerHTML = '<div class="log-entry error">诊断失败: ' + e.message + '</div>';
+    }
+}
+
 async function probeRouter(name) {
     log('正在探测 ' + name + '...');
     try {
@@ -734,6 +515,85 @@ document.addEventListener('DOMContentLoaded', () => {
             openModal('modal-global-config');
         } catch (e) {
             log('获取配置失败: ' + e.message, 'error');
+        }
+    });
+
+    // Detect network button
+    $('#btn-detect-net').addEventListener('click', async () => {
+        const btn = $('#btn-detect-net');
+        const originalText = btn.textContent;
+        btn.disabled = true;
+        btn.textContent = '获取中...';
+        
+        try {
+            log('正在尝试自动探测网络配置...');
+            const result = await apiCall('/detect-net', { method: 'POST' });
+            const form = $('#form-global-config');
+            form.cidr.value = result.cidr;
+            form.iface.value = result.iface;
+            log('自动探测成功: ' + result.iface + ' (' + result.cidr + ')', 'success');
+        } catch (e) {
+            log('自动探测失败: ' + e.message, 'error');
+            alert('探测失败: ' + e.message + '\n\n请确保已添加至少一个路由器且网络连接正常。');
+        } finally {
+            btn.disabled = false;
+            btn.textContent = originalText;
+        }
+    });
+
+    // Router probe in modal
+    $('#btn-router-probe').addEventListener('click', async () => {
+        const form = $('#form-add-router');
+        const host = form.host.value;
+        const user = form.user.value;
+        const password = form.password.value;
+        const port = parseInt(form.port.value) || 22;
+        
+        if (!host) {
+            alert('请先输入主机地址');
+            return;
+        }
+
+        const btn = $('#btn-router-probe');
+        btn.disabled = true;
+        const originalText = btn.textContent;
+        btn.textContent = '探测中...';
+        
+        try {
+            log('正在探测 ' + host + '...');
+            const result = await apiCall('/detect-net', { 
+                method: 'POST',
+                body: JSON.stringify({
+                    host, user, password, port
+                })
+            });
+            log('探测成功: ' + result.iface + ' (' + result.cidr + ')', 'success');
+            
+            // Suggest filling global config if empty
+            const currentCfg = await apiCall('/config');
+            if (!currentCfg.lan.iface || !currentCfg.lan.cidr) {
+                if (confirm('探测到网段: ' + result.cidr + '\n网卡: ' + result.iface + '\n\n是否将其设为全局默认配置？')) {
+                    await apiCall('/config', {
+                        method: 'PUT',
+                        body: JSON.stringify({
+                            lan: {
+                                iface: result.iface,
+                                cidr: result.cidr,
+                                vip: currentCfg.lan.vip || result.cidr.split('.').slice(0, 3).join('.') + '.254'
+                            }
+                        })
+                    });
+                    log('已自动更新全局网络配置', 'success');
+                }
+            } else {
+                alert('探测成功！\n网卡: ' + result.iface + '\n网段: ' + result.cidr);
+            }
+        } catch (e) {
+            log('探测失败: ' + e.message, 'error');
+            alert('探测失败: ' + e.message);
+        } finally {
+            btn.disabled = false;
+            btn.textContent = originalText;
         }
     });
     

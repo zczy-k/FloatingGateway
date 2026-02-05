@@ -8,7 +8,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/floatip/gateway/internal/config"
+	"github.com/zczy-k/FloatingGateway/internal/config"
 )
 
 // Server is the HTTP API server for the controller.
@@ -39,6 +39,7 @@ func (s *Server) setupRoutes() {
 	s.mux.HandleFunc("/api/routers/", s.handleRouter)
 	s.mux.HandleFunc("/api/status", s.handleStatus)
 	s.mux.HandleFunc("/api/config", s.handleConfig)
+	s.mux.HandleFunc("/api/detect-net", s.handleDetectNet)
 
 	// Static files (web UI)
 	s.mux.HandleFunc("/", s.handleStatic)
@@ -148,9 +149,28 @@ func (s *Server) handleRouter(w http.ResponseWriter, r *http.Request) {
 		s.handleRouterInstall(w, r, router)
 	case "uninstall":
 		s.handleRouterUninstall(w, r, router)
+	case "doctor":
+		s.handleRouterDoctor(w, r, router)
 	default:
 		writeError(w, http.StatusNotFound, fmt.Errorf("unknown action %q", action))
 	}
+}
+
+// handleRouterDoctor handles GET /api/routers/{name}/doctor
+func (s *Server) handleRouterDoctor(w http.ResponseWriter, r *http.Request, router *Router) {
+	if r.Method != http.MethodGet {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+
+	report, err := s.manager.Doctor(router)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.Write([]byte(report))
 }
 
 // handleRouterCRUD handles GET/PUT/DELETE on a router.
@@ -325,7 +345,14 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 		}
 
 		cfg := s.manager.GetConfig()
-		if update.LAN.VIP != "" {
+		if update.LAN.VIP != "" && update.LAN.VIP != cfg.LAN.VIP {
+			// Check for conflict
+			conflict, _ := s.manager.CheckVIPConflict(update.LAN.VIP)
+			if conflict {
+				// We still allow it, but we should return a warning or info
+				// For now, let's just log it and maybe we can handle it in UI
+				fmt.Printf("Warning: VIP %s is already reachable on the network\n", update.LAN.VIP)
+			}
 			cfg.LAN.VIP = update.LAN.VIP
 		}
 		if update.LAN.CIDR != "" {
@@ -347,6 +374,69 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 	default:
 		w.WriteHeader(http.StatusMethodNotAllowed)
 	}
+}
+
+// handleDetectNet handles POST /api/detect-net
+func (s *Server) handleDetectNet(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+
+	var onlineRouter *Router
+
+	// Try to parse router info from body (for detecting before adding)
+	if r.ContentLength > 0 {
+		var bodyRouter Router
+		if err := json.NewDecoder(r.Body).Decode(&bodyRouter); err == nil && bodyRouter.Host != "" {
+			onlineRouter = &bodyRouter
+			if onlineRouter.Port == 0 {
+				onlineRouter.Port = 22
+			}
+			if onlineRouter.User == "" {
+				onlineRouter.User = "root"
+			}
+		}
+	}
+
+	// If no router in body, use existing routers
+	if onlineRouter == nil {
+		routers := s.manager.GetRouters()
+		if len(routers) == 0 {
+			writeError(w, http.StatusBadRequest, fmt.Errorf("请先添加一个路由器，或在弹窗中输入 SSH 信息后再试"))
+			return
+		}
+
+		// Try to find an online router
+		for _, router := range routers {
+			if router.Status == StatusOnline {
+				onlineRouter = router
+				break
+			}
+		}
+
+		if onlineRouter == nil {
+			onlineRouter = routers[0]
+		}
+	}
+
+	client := NewSSHClient(s.manager.sshConfig(onlineRouter))
+	if err := client.Connect(); err != nil {
+		writeError(w, http.StatusInternalServerError, fmt.Errorf("无法连接到 %s: %w", onlineRouter.Host, err))
+		return
+	}
+	defer client.Close()
+
+	iface, cidr, err := s.manager.DetectNetwork(client, onlineRouter.Host)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]string{
+		"iface": iface,
+		"cidr":  cidr,
+	})
 }
 
 // handleStatic serves the web UI.

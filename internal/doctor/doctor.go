@@ -8,11 +8,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/floatip/gateway/internal/config"
-	"github.com/floatip/gateway/internal/keepalived"
-	"github.com/floatip/gateway/internal/platform/detect"
-	"github.com/floatip/gateway/internal/platform/exec"
-	"github.com/floatip/gateway/internal/platform/netutil"
+	"github.com/zczy-k/FloatingGateway/internal/config"
+	"github.com/zczy-k/FloatingGateway/internal/keepalived"
+	"github.com/zczy-k/FloatingGateway/internal/platform/detect"
+	"github.com/zczy-k/FloatingGateway/internal/platform/exec"
+	"github.com/zczy-k/FloatingGateway/internal/platform/netutil"
 )
 
 // CheckResult represents a single check result.
