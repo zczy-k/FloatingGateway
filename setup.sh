@@ -3,6 +3,8 @@
 # 
 # 这是一个交互式脚本，你可以通过输入数字来执行各种管理任务。
 
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
@@ -29,17 +31,17 @@ read -r main_choice
 
 case "$main_choice" in
     1)
-        if [ -f "./scripts/controller.sh" ]; then
-            sh ./scripts/controller.sh
+        if [ -f "${SCRIPT_DIR}/scripts/controller.sh" ]; then
+            sh "${SCRIPT_DIR}/scripts/controller.sh"
         else
-            echo "找不到 ./scripts/controller.sh"
+            echo "找不到 ${SCRIPT_DIR}/scripts/controller.sh"
         fi
         ;;
     2)
-        if [ -f "./scripts/router.sh" ]; then
-            sh ./scripts/router.sh
+        if [ -f "${SCRIPT_DIR}/scripts/router.sh" ]; then
+            sh "${SCRIPT_DIR}/scripts/router.sh"
         else
-            echo "找不到 ./scripts/router.sh"
+            echo "找不到 ${SCRIPT_DIR}/scripts/router.sh"
         fi
         ;;
     0)
