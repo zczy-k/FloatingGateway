@@ -497,8 +497,11 @@ func (m *Manager) Install(r *Router, agentConfig *config.Config) error {
 
 	// Apply agent config
 	r.StepLog("初始化 Agent 配置...")
-	if _, err := client.RunCombined("gateway-agent apply"); err != nil {
+	if output, err := client.RunCombined("gateway-agent apply"); err != nil {
 		r.AddLog("!! 初始化失败: " + err.Error())
+		if output != "" {
+			r.AddLog("   输出: " + output)
+		}
 		return fmt.Errorf("apply config: %w", err)
 	}
 
@@ -716,6 +719,9 @@ func (m *Manager) downloadAgentBinary(r *Router, goos, goarch string) (string, e
 
 	client := &http.Client{Timeout: 120 * time.Second}
 
+	// Use unique temp file name with PID to avoid conflicts
+	tmpPath := fmt.Sprintf("%s.%d.tmp", destPath, os.Getpid())
+
 	for i, url := range urls {
 		if i > 0 {
 			r.AddLog(fmt.Sprintf("   尝试备用下载源 (%d/%d)...", i+1, len(urls)))
@@ -735,8 +741,13 @@ func (m *Manager) downloadAgentBinary(r *Router, goos, goarch string) (string, e
 			continue
 		}
 
+		// Ensure cache directory still exists (in case it was deleted)
+		if err := os.MkdirAll(cacheDir, 0755); err != nil {
+			resp.Body.Close()
+			return "", fmt.Errorf("创建缓存目录失败: %w", err)
+		}
+
 		// Download to temp file first
-		tmpPath := destPath + ".tmp"
 		f, err := os.Create(tmpPath)
 		if err != nil {
 			resp.Body.Close()

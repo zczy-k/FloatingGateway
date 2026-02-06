@@ -241,6 +241,15 @@ func (s *Server) handleRouterInstall(w http.ResponseWriter, r *http.Request, rou
 		return
 	}
 
+	// Prevent duplicate install requests
+	if router.Status == StatusInstalling {
+		writeJSON(w, http.StatusConflict, map[string]string{
+			"error":   "already_installing",
+			"message": "安装正在进行中，请等待完成",
+		})
+		return
+	}
+
 	// Parse optional config override
 	var configOverride config.Config
 	if r.ContentLength > 0 {
@@ -276,6 +285,15 @@ func (s *Server) handleRouterInstall(w http.ResponseWriter, r *http.Request, rou
 func (s *Server) handleRouterUninstall(w http.ResponseWriter, r *http.Request, router *Router) {
 	if r.Method != http.MethodPost {
 		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Prevent duplicate uninstall requests
+	if router.Status == StatusUninstalling {
+		writeJSON(w, http.StatusConflict, map[string]string{
+			"error":   "already_uninstalling",
+			"message": "卸载正在进行中，请等待完成",
+		})
 		return
 	}
 
