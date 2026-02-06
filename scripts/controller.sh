@@ -354,10 +354,7 @@ do_install() {
     echo ""
     log "安装完成!"
     echo ""
-    info "下一步:"
-    info "  1. 启动 Controller: $CONTROLLER_NAME serve -c $CONFIG_FILE"
-    info "  2. 打开浏览器访问: http://localhost:8080"
-    info "  3. 在 Web 界面中完成配置 (VIP、路由器等)"
+    info "下一步: 在菜单中选择 \"启动 Controller 服务\" 即可"
 }
 
 # ============== 卸载 ==============
@@ -419,7 +416,10 @@ do_start() {
             ;;
     esac
     
+    local ip
+    ip=$(get_local_ip)
     log "Controller 已启动"
+    info "打开浏览器访问: http://${ip}:8080"
 }
 
 do_stop() {
