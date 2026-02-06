@@ -19,9 +19,6 @@ CONFIG_FILE="${CONFIG_DIR}/config.yaml"
 SYSTEMD_UNIT="/etc/systemd/system/gateway-controller.service"
 LAUNCHD_PLIST="${HOME}/Library/LaunchAgents/com.floatip.gateway-controller.plist"
 
-# 下载源（需要替换为实际 URL）
-DOWNLOAD_BASE="${DOWNLOAD_BASE:-https://github.com/zczy-k/FloatingGateway/releases/latest/download}"
-
 # 颜色
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -177,10 +174,10 @@ get_latest_version() {
 
 # ============== 下载 ==============
 # GitHub 加速镜像列表，按优先级排列
-GH_PROXIES="https://xuc.xi-xu.me/ https://gh-proxy.com/ https://ghfast.top/"
+GH_PROXIES="https://xuc.xi-xu.me https://gh-proxy.com https://ghfast.top"
 
 # 通用下载函数：尝试加速镜像，最后用官方兜底
-# 参数: $1=文件URL, $2=保存路径
+# 参数: $1=GitHub原始URL(必须是https://github.com/...), $2=保存路径
 download_with_proxy() {
     local url="$1"
     local target="$2"
@@ -188,23 +185,38 @@ download_with_proxy() {
     
     # 先尝试加速镜像
     for proxy in $GH_PROXIES; do
-        local proxy_url="${proxy}${url}"
+        # 格式: https://gh-proxy.com/https://github.com/...
+        local proxy_url="${proxy}/${url}"
         info "尝试下载: $proxy_url"
         
+        # 先删除可能存在的旧文件
+        rm -f "$target" 2>/dev/null
+        
         if command -v curl >/dev/null 2>&1; then
-            if sudo curl -sSL --connect-timeout 10 --max-time 120 "$proxy_url" -o "$target" 2>/dev/null || \
-               curl -sSL --connect-timeout 10 --max-time 120 "$proxy_url" -o "$target" 2>/dev/null; then
-                # 检查文件是否有效
+            if sudo curl -fsSL --connect-timeout 15 --max-time 180 -o "$target" "$proxy_url" 2>/dev/null || \
+               curl -fsSL --connect-timeout 15 --max-time 180 -o "$target" "$proxy_url" 2>/dev/null; then
+                # 检查文件是否有效（非空且不是 HTML 错误页面）
                 if [ -f "$target" ] && [ -s "$target" ]; then
+                    # 检查是否为 HTML（错误页面）
+                    if file "$target" 2>/dev/null | grep -qiE 'HTML|text'; then
+                        warn "下载内容为 HTML 错误页面，跳过: $proxy"
+                        rm -f "$target" 2>/dev/null
+                        continue
+                    fi
                     log "下载成功 (使用加速: $proxy)"
                     success=1
                     break
                 fi
             fi
         elif command -v wget >/dev/null 2>&1; then
-            if sudo wget -q --timeout=120 "$proxy_url" -O "$target" 2>/dev/null || \
-               wget -q --timeout=120 "$proxy_url" -O "$target" 2>/dev/null; then
+            if sudo wget -q --timeout=180 -O "$target" "$proxy_url" 2>/dev/null || \
+               wget -q --timeout=180 -O "$target" "$proxy_url" 2>/dev/null; then
                 if [ -f "$target" ] && [ -s "$target" ]; then
+                    if file "$target" 2>/dev/null | grep -qiE 'HTML|text'; then
+                        warn "下载内容为 HTML 错误页面，跳过: $proxy"
+                        rm -f "$target" 2>/dev/null
+                        continue
+                    fi
                     log "下载成功 (使用加速: $proxy)"
                     success=1
                     break
@@ -218,21 +230,26 @@ download_with_proxy() {
     if [ "$success" -eq 0 ]; then
         warn "所有加速镜像失败，尝试直连 GitHub..."
         info "直连: $url"
+        rm -f "$target" 2>/dev/null
         
         if command -v curl >/dev/null 2>&1; then
-            if sudo curl -sSL --connect-timeout 30 --max-time 300 "$url" -o "$target" 2>/dev/null || \
-               curl -sSL --connect-timeout 30 --max-time 300 "$url" -o "$target" 2>/dev/null; then
+            if sudo curl -fsSL --connect-timeout 30 --max-time 300 -o "$target" "$url" 2>/dev/null || \
+               curl -fsSL --connect-timeout 30 --max-time 300 -o "$target" "$url" 2>/dev/null; then
                 if [ -f "$target" ] && [ -s "$target" ]; then
-                    log "下载成功 (直连 GitHub)"
-                    success=1
+                    if ! file "$target" 2>/dev/null | grep -qiE 'HTML|text'; then
+                        log "下载成功 (直连 GitHub)"
+                        success=1
+                    fi
                 fi
             fi
         elif command -v wget >/dev/null 2>&1; then
-            if sudo wget -q --timeout=300 "$url" -O "$target" 2>/dev/null || \
-               wget -q --timeout=300 "$url" -O "$target" 2>/dev/null; then
+            if sudo wget -q --timeout=300 -O "$target" "$url" 2>/dev/null || \
+               wget -q --timeout=300 -O "$target" "$url" 2>/dev/null; then
                 if [ -f "$target" ] && [ -s "$target" ]; then
-                    log "下载成功 (直连 GitHub)"
-                    success=1
+                    if ! file "$target" 2>/dev/null | grep -qiE 'HTML|text'; then
+                        log "下载成功 (直连 GitHub)"
+                        success=1
+                    fi
                 fi
             fi
         fi
@@ -243,7 +260,8 @@ download_with_proxy() {
 
 download_controller() {
     local binary_name="${CONTROLLER_NAME}-${GOOS}-${GOARCH}"
-    local url="${DOWNLOAD_BASE}/${binary_name}"
+    # 始终使用原始 GitHub URL，让 download_with_proxy 处理代理
+    local github_url="https://github.com/zczy-k/FloatingGateway/releases/latest/download/${binary_name}"
     local target="${INSTALL_DIR}/${CONTROLLER_NAME}"
     
     log "下载 $binary_name..."
@@ -253,8 +271,8 @@ download_controller() {
         sudo mkdir -p "$INSTALL_DIR" 2>/dev/null || mkdir -p "$INSTALL_DIR"
     fi
     
-    # 使用加速下载
-    if ! download_with_proxy "$url" "$target"; then
+    # 使用加速下载（传入原始 GitHub URL）
+    if ! download_with_proxy "$github_url" "$target"; then
         error "下载失败: 所有下载源均不可用"
     fi
     

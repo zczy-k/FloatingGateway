@@ -8,8 +8,8 @@
 
 GH_PROXY="${GH_PROXY:-}"  # 可通过环境变量预设
 
-# GitHub 加速镜像列表
-GH_PROXIES="https://xuc.xi-xu.me/ https://gh-proxy.com/ https://ghfast.top/"
+# GitHub 加速镜像列表（不带末尾斜杠）
+GH_PROXIES="https://xuc.xi-xu.me https://gh-proxy.com https://ghfast.top"
 
 REPO_RAW_BASE="https://raw.githubusercontent.com/zczy-k/FloatingGateway/main"
 REPO_RELEASE_BASE="https://github.com/zczy-k/FloatingGateway/releases/latest/download"
@@ -42,12 +42,13 @@ download() {
 # 测试代理速度并返回响应时间（毫秒），失败返回 9999
 test_proxy_speed() {
     local proxy="$1"
-    local test_url="${proxy}https://raw.githubusercontent.com/zczy-k/FloatingGateway/main/README.md"
+    # 注意格式：proxy/url
+    local test_url="${proxy}/https://raw.githubusercontent.com/zczy-k/FloatingGateway/main/README.md"
     local start end elapsed
     
     start=$(date +%s%3N 2>/dev/null || date +%s)
     if command -v curl >/dev/null 2>&1; then
-        if curl -sSL --connect-timeout 5 --max-time 10 "$test_url" -o /dev/null 2>/dev/null; then
+        if curl -fsSL --connect-timeout 5 --max-time 10 "$test_url" -o /dev/null 2>/dev/null; then
             end=$(date +%s%3N 2>/dev/null || date +%s)
             elapsed=$((end - start))
             echo "$elapsed"
@@ -118,7 +119,8 @@ detect_proxy() {
 proxy_url() {
     local url="$1"
     if [ -n "$GH_PROXY" ]; then
-        echo "${GH_PROXY}${url}"
+        # 格式: https://gh-proxy.com/https://github.com/...
+        echo "${GH_PROXY}/${url}"
     else
         echo "$url"
     fi
@@ -130,9 +132,8 @@ run_subscript() {
 
     # 尝试本地路径
     if [ -n "$SCRIPT_DIR" ] && [ -f "${SCRIPT_DIR}/${name}" ]; then
-        # 传递代理和下载地址给子脚本
+        # 传递代理给子脚本（子脚本自己处理加速下载逻辑）
         export GH_PROXY
-        export DOWNLOAD_BASE="$(proxy_url "$REPO_RELEASE_BASE")"
         bash "${SCRIPT_DIR}/${name}"
         return
     fi
@@ -149,9 +150,8 @@ run_subscript() {
         exit 1
     fi
 
-    # 传递代理和下载地址给子脚本
+    # 传递代理给子脚本（子脚本自己处理加速下载逻辑）
     export GH_PROXY
-    export DOWNLOAD_BASE="$(proxy_url "$REPO_RELEASE_BASE")"
     bash "$tmp"
     rm -f "$tmp"
 }
