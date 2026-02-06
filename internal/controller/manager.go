@@ -3,6 +3,8 @@ package controller
 import (
 	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -75,11 +77,13 @@ func (r *Router) MarshalJSON() ([]byte, error) {
 
 // ControllerConfig holds controller configuration.
 type ControllerConfig struct {
-	Version  int       `yaml:"version" json:"version"`
-	Listen   string    `yaml:"listen" json:"listen"`
-	Routers  []*Router `yaml:"routers" json:"routers"`
-	AgentBin string    `yaml:"agent_bin" json:"agent_bin"` // Path to gateway-agent binary
-	LAN      struct {
+	Version      int       `yaml:"version" json:"version"`
+	Listen       string    `yaml:"listen" json:"listen"`
+	Routers      []*Router `yaml:"routers" json:"routers"`
+	AgentBin     string    `yaml:"agent_bin" json:"agent_bin"`           // Path to gateway-agent binary (manual override)
+	DownloadBase string    `yaml:"download_base" json:"download_base"`   // Release download base URL
+	GHProxy      string    `yaml:"gh_proxy" json:"gh_proxy"`             // GitHub acceleration proxy for China
+	LAN          struct {
 		VIP   string `yaml:"vip" json:"vip"`
 		CIDR  string `yaml:"cidr" json:"cidr"`
 		Iface string `yaml:"iface" json:"iface"`
@@ -90,6 +94,16 @@ type ControllerConfig struct {
 	Health struct {
 		Mode config.HealthMode `yaml:"mode" json:"mode"`
 	} `yaml:"health" json:"health"`
+}
+
+const defaultDownloadBase = "https://github.com/zczy-k/FloatingGateway/releases/latest/download"
+
+// GitHub 加速镜像列表，按优先级排列
+var ghProxies = []string{
+	"https://ghfast.top/",
+	"https://github.moeyy.xyz/",
+	"https://gh-proxy.com/",
+	"https://ghproxy.net/",
 }
 
 // Manager handles router management operations.
@@ -381,7 +395,7 @@ func (r *Router) StepLog(msg string) {
 func (m *Manager) Install(r *Router, agentConfig *config.Config) error {
 	r.InstallLog = nil
 	r.InstallStep = 0
-	r.InstallTotal = 10
+	r.InstallTotal = 11
 	r.Error = ""
 	r.Status = StatusInstalling
 
@@ -422,16 +436,26 @@ func (m *Manager) Install(r *Router, agentConfig *config.Config) error {
 			}
 		}
 	}
-	r.AddLog("   架构: " + arch)
 
-	// Find appropriate binary
+	goarch := normalizeArch(arch)
+	goos := "linux"
+	r.AddLog(fmt.Sprintf("   架构: %s (目标: %s/%s)", arch, goos, goarch))
+
+	// Try to find agent binary locally first
 	r.StepLog("查找适配的 Agent 二进制文件...")
-	binPath, err := m.findAgentBinary(platform, arch)
+	binPath, err := m.findAgentBinary(goos, goarch)
 	if err != nil {
-		r.AddLog("!! 未找到适配的二进制文件: " + err.Error())
-		return fmt.Errorf("find binary: %w", err)
+		// Not found locally, download from remote
+		r.AddLog("   本地未找到，从远程仓库下载...")
+		r.StepLog("从远程仓库下载 Agent 二进制文件...")
+		binPath, err = m.downloadAgentBinary(r, goos, goarch)
+		if err != nil {
+			r.AddLog("!! 下载失败: " + err.Error())
+			return fmt.Errorf("download binary: %w", err)
+		}
+	} else {
+		r.AddLog("   使用本地文件: " + binPath)
 	}
-	r.AddLog("   使用: " + binPath)
 
 	// Read and upload binary
 	r.StepLog("上传 Agent 到目标设备 (可能需要等待)...")
@@ -573,50 +597,56 @@ func (m *Manager) CheckVIPConflict(vip string) (bool, error) {
 	return err == nil, nil
 }
 
-// findAgentBinary finds the appropriate agent binary.
-func (m *Manager) findAgentBinary(platform Platform, arch string) (string, error) {
-	// Normalize architecture
-	goarch := arch
+// normalizeArch converts uname -m output to Go's GOARCH naming.
+func normalizeArch(arch string) string {
 	switch arch {
 	case "x86_64", "amd64":
-		goarch = "amd64"
+		return "amd64"
 	case "i386", "i686":
-		goarch = "386"
+		return "386"
 	case "aarch64", "arm64":
-		goarch = "arm64"
+		return "arm64"
 	case "armv7l", "armv8l", "armv6l":
-		goarch = "arm"
+		return "arm"
 	case "mips":
-		goarch = "mips"
+		return "mips"
 	case "mipsel", "mipsle":
-		goarch = "mipsle"
+		return "mipsle"
+	default:
+		return arch
 	}
+}
 
-	goos := "linux"
+// agentCacheDir returns the directory for cached agent binaries.
+func (m *Manager) agentCacheDir() string {
+	return filepath.Join(filepath.Dir(m.configPath), "agents")
+}
 
-	// Check configured path first
+// findAgentBinary finds the appropriate agent binary from local cache or configured path.
+// It does NOT download; downloading is a separate step in the install flow.
+func (m *Manager) findAgentBinary(goos, goarch string) (string, error) {
+	// 1. Check configured path first
 	if m.config.AgentBin != "" {
 		if _, err := os.Stat(m.config.AgentBin); err == nil {
 			return m.config.AgentBin, nil
 		}
 	}
 
-	// Look for platform-specific binary
+	// 2. Look for platform-specific binary
 	patterns := []string{
 		fmt.Sprintf("gateway-agent-%s-%s", goos, goarch),
 		fmt.Sprintf("gateway-agent_%s_%s", goos, goarch),
 		"gateway-agent",
 	}
 
-	// Search relative to working dir AND relative to the executable itself
-	// (systemd may set working dir to / while binary is in /usr/local/bin)
+	// Search dirs: cache dir, working dir, exe dir, system paths
 	searchDirs := []string{
+		m.agentCacheDir(),
 		".",
 		"./bin",
 		"./dist",
 	}
 
-	// Add executable's directory and its siblings
 	if exePath, err := os.Executable(); err == nil {
 		exeDir := filepath.Dir(exePath)
 		searchDirs = append(searchDirs,
@@ -626,22 +656,125 @@ func (m *Manager) findAgentBinary(platform Platform, arch string) (string, error
 		)
 	}
 
-	// Also check common system install paths
-	searchDirs = append(searchDirs,
-		"/usr/local/bin",
-		"/usr/bin",
-	)
+	searchDirs = append(searchDirs, "/usr/local/bin", "/usr/bin")
 
 	for _, dir := range searchDirs {
 		for _, pattern := range patterns {
 			path := filepath.Join(dir, pattern)
-			if _, err := os.Stat(path); err == nil {
+			if info, err := os.Stat(path); err == nil && info.Size() > 0 {
 				return path, nil
 			}
 		}
 	}
 
-	return "", fmt.Errorf("未找到 %s/%s 的 Agent 二进制文件 (搜索了 %d 个目录，当前 GOOS=%s)", goos, goarch, len(searchDirs), runtime.GOOS)
+	return "", fmt.Errorf("未找到 %s/%s 的 Agent 二进制文件", goos, goarch)
+}
+
+// downloadAgentBinary downloads the agent binary for the given platform/arch from GitHub Releases.
+// It tries acceleration proxies first (for China users), then falls back to direct download.
+// Returns the path to the downloaded binary.
+func (m *Manager) downloadAgentBinary(r *Router, goos, goarch string) (string, error) {
+	binaryName := fmt.Sprintf("gateway-agent-%s-%s", goos, goarch)
+	cacheDir := m.agentCacheDir()
+	destPath := filepath.Join(cacheDir, binaryName)
+
+	// Check if already cached
+	if info, err := os.Stat(destPath); err == nil && info.Size() > 0 {
+		r.AddLog("   已有缓存: " + destPath)
+		return destPath, nil
+	}
+
+	if err := os.MkdirAll(cacheDir, 0755); err != nil {
+		return "", fmt.Errorf("创建缓存目录失败: %w", err)
+	}
+
+	// Build download URL
+	base := m.config.DownloadBase
+	if base == "" {
+		base = defaultDownloadBase
+	}
+	directURL := base + "/" + binaryName
+
+	// Build candidate URLs: user-configured proxy, then built-in proxies, then direct
+	var urls []string
+
+	if m.config.GHProxy != "" {
+		// User-configured proxy
+		proxy := m.config.GHProxy
+		if !strings.HasSuffix(proxy, "/") {
+			proxy += "/"
+		}
+		urls = append(urls, proxy+directURL)
+	}
+
+	// Built-in acceleration proxies
+	for _, proxy := range ghProxies {
+		urls = append(urls, proxy+directURL)
+	}
+
+	// Direct download as last resort
+	urls = append(urls, directURL)
+
+	client := &http.Client{Timeout: 120 * time.Second}
+
+	for i, url := range urls {
+		if i > 0 {
+			r.AddLog(fmt.Sprintf("   尝试备用下载源 (%d/%d)...", i+1, len(urls)))
+		}
+
+		r.AddLog("   下载: " + url)
+
+		resp, err := client.Get(url)
+		if err != nil {
+			r.AddLog("   !! 连接失败: " + err.Error())
+			continue
+		}
+
+		if resp.StatusCode != http.StatusOK {
+			resp.Body.Close()
+			r.AddLog(fmt.Sprintf("   !! HTTP %d", resp.StatusCode))
+			continue
+		}
+
+		// Download to temp file first
+		tmpPath := destPath + ".tmp"
+		f, err := os.Create(tmpPath)
+		if err != nil {
+			resp.Body.Close()
+			return "", fmt.Errorf("创建临时文件失败: %w", err)
+		}
+
+		written, err := io.Copy(f, resp.Body)
+		f.Close()
+		resp.Body.Close()
+
+		if err != nil {
+			os.Remove(tmpPath)
+			r.AddLog("   !! 下载中断: " + err.Error())
+			continue
+		}
+
+		if written == 0 {
+			os.Remove(tmpPath)
+			r.AddLog("   !! 下载的文件为空")
+			continue
+		}
+
+		// Rename temp to final
+		if err := os.Rename(tmpPath, destPath); err != nil {
+			os.Remove(tmpPath)
+			return "", fmt.Errorf("重命名文件失败: %w", err)
+		}
+
+		if err := os.Chmod(destPath, 0755); err != nil {
+			return "", fmt.Errorf("设置权限失败: %w", err)
+		}
+
+		r.AddLog(fmt.Sprintf("   下载完成 (%.1f MB)", float64(written)/1024/1024))
+		return destPath, nil
+	}
+
+	return "", fmt.Errorf("所有下载源均失败，请检查网络连接或手动将 %s 放到 %s 目录", binaryName, cacheDir)
 }
 
 // installKeepalived installs keepalived on the remote system.

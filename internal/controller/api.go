@@ -257,7 +257,7 @@ func (s *Server) handleRouterInstall(w http.ResponseWriter, r *http.Request, rou
 	router.Status = StatusInstalling
 	router.InstallLog = nil
 	router.InstallStep = 0
-	router.InstallTotal = 10
+	router.InstallTotal = 11
 	router.Error = ""
 	go func() {
 		if err := s.manager.Install(router, agentConfig); err != nil {

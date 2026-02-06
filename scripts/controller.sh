@@ -218,6 +218,69 @@ download_controller() {
     log "已安装到 $target"
 }
 
+# ============== 下载 Agent 二进制文件 ==============
+AGENT_DIR="${CONFIG_DIR}/agents"
+
+download_agents() {
+    # Agent 目标平台列表（controller 需要给各种架构的路由器部署 agent）
+    local agent_targets=(
+        "linux/amd64"
+        "linux/arm64"
+        "linux/arm"
+        "linux/mips"
+        "linux/mipsle"
+    )
+
+    mkdir -p "$AGENT_DIR"
+
+    local success=0
+    local failed=0
+
+    for target in "${agent_targets[@]}"; do
+        local os="${target%/*}"
+        local arch="${target#*/}"
+        local binary_name="gateway-agent-${os}-${arch}"
+        local url="${DOWNLOAD_BASE}/${binary_name}"
+        local dest="${AGENT_DIR}/${binary_name}"
+
+        # 如果已存在且非空，跳过
+        if [ -f "$dest" ] && [ -s "$dest" ]; then
+            info "已存在: ${binary_name}，跳过"
+            success=$((success + 1))
+            continue
+        fi
+
+        info "下载 ${binary_name}..."
+        if command -v curl >/dev/null 2>&1; then
+            if curl -sSL --connect-timeout 15 --fail "$url" -o "$dest" 2>/dev/null; then
+                chmod +x "$dest"
+                success=$((success + 1))
+            else
+                rm -f "$dest"
+                warn "下载失败: ${binary_name} (可能该架构尚未发布)"
+                failed=$((failed + 1))
+            fi
+        elif command -v wget >/dev/null 2>&1; then
+            if wget -q --timeout=15 "$url" -O "$dest" 2>/dev/null; then
+                chmod +x "$dest"
+                success=$((success + 1))
+            else
+                rm -f "$dest"
+                warn "下载失败: ${binary_name} (可能该架构尚未发布)"
+                failed=$((failed + 1))
+            fi
+        fi
+    done
+
+    if [ $success -eq 0 ]; then
+        warn "未能下载任何 Agent 二进制文件，远程安装 Agent 将不可用"
+        warn "你可以手动将 gateway-agent-<os>-<arch> 文件放到 ${AGENT_DIR}/ 目录"
+    else
+        log "Agent 二进制文件已就绪: ${success} 个成功, ${failed} 个失败"
+        info "存储位置: ${AGENT_DIR}/"
+    fi
+}
+
 # ============== 配置文件 ==============
 create_default_config() {
     mkdir -p "$CONFIG_DIR"
@@ -401,7 +464,7 @@ remove_procd_service() {
 # ============== 安装 ==============
 do_install() {
     STEP_CURRENT=0
-    STEP_TOTAL=5
+    STEP_TOTAL=6
     echo ""
     printf "${BLUE}========== 安装 Gateway Controller ==========${NC}\n"
     echo ""
@@ -432,8 +495,11 @@ do_install() {
         info "未检测到已安装版本，执行全新安装"
     fi
 
-    step "下载并验证二进制文件..."
+    step "下载并验证 Controller 二进制文件..."
     download_controller
+
+    step "下载 Agent 二进制文件 (用于远程部署)..."
+    download_agents
 
     step "生成默认配置文件..."
     create_default_config
