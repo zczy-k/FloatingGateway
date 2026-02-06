@@ -111,33 +111,35 @@ echo ""
 
 # 自动检测是否需要代理
 detect_proxy
-echo ""
 
-echo "你想管理哪个部分？"
-echo ""
-echo "  1) [管理端] Gateway Controller (Web UI, 部署中心)"
-echo "     - 适用于你的电脑或长期运行的服务器"
-echo ""
-echo "  2) [路由器] Gateway Agent (VIP 漂移, 健康检测)"
-echo "     - 适用于 OpenWrt 路由器或旁路由服务器"
-echo ""
-echo "  0) 退出"
-echo "-----------------------------------------------"
-printf "请选择 [0-2]: "
-read -r main_choice
+while true; do
+    echo ""
+    echo "你想管理哪个部分？"
+    echo ""
+    echo "  1) [管理端] Gateway Controller (Web UI, 部署中心)"
+    echo "     - 适用于你的电脑或长期运行的服务器"
+    echo ""
+    echo "  2) [路由器] Gateway Agent (VIP 漂移, 健康检测)"
+    echo "     - 适用于 OpenWrt 路由器或旁路由服务器"
+    echo ""
+    echo "  0) 退出"
+    echo "-----------------------------------------------"
+    printf "请选择 [0-2]: "
+    read -r main_choice
 
-case "$main_choice" in
-    1)
-        run_subscript "scripts/controller.sh"
-        ;;
-    2)
-        run_subscript "scripts/router.sh"
-        ;;
-    0)
-        exit 0
-        ;;
-    *)
-        echo "无效选项，退出。"
-        exit 1
-        ;;
-esac
+    case "$main_choice" in
+        1)
+            run_subscript "scripts/controller.sh"
+            ;;
+        2)
+            run_subscript "scripts/router.sh"
+            ;;
+        0)
+            echo "再见!"
+            exit 0
+            ;;
+        *)
+            printf "${YELLOW}[!]${NC} 无效选项，请重试\n"
+            ;;
+    esac
+done

@@ -170,6 +170,53 @@ install_dependencies() {
     esac
 }
 
+# ============== 版本检测 ==============
+get_installed_agent_version() {
+    if [ -x "$INSTALL_DIR/gateway-agent" ]; then
+        "$INSTALL_DIR/gateway-agent" version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1
+    fi
+}
+
+get_latest_agent_version() {
+    local api_url="https://api.github.com/repos/zczy-k/FloatingGateway/releases/latest"
+    if [ -n "$GH_PROXY" ]; then
+        api_url="${GH_PROXY}${api_url}"
+    fi
+    local tag=""
+    if command -v curl >/dev/null 2>&1; then
+        tag=$(curl -sSL --connect-timeout 10 "$api_url" 2>/dev/null | grep '"tag_name"' | head -1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+')
+    elif command -v wget >/dev/null 2>&1; then
+        tag=$(wget -q --timeout=10 -O - "$api_url" 2>/dev/null | grep '"tag_name"' | head -1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+')
+    fi
+    echo "$tag"
+}
+
+# 检查是否需要更新，返回 0 表示已是最新不需要更新
+check_agent_up_to_date() {
+    local installed_ver
+    installed_ver=$(get_installed_agent_version)
+    if [ -z "$installed_ver" ]; then
+        return 1  # 未安装，需要安装
+    fi
+
+    info "当前已安装版本: v${installed_ver}"
+    info "正在检查最新版本..."
+    local latest_ver
+    latest_ver=$(get_latest_agent_version)
+    if [ -n "$latest_ver" ]; then
+        if [ "$installed_ver" = "$latest_ver" ]; then
+            log "已是最新版本 (v${latest_ver})，无需更新"
+            return 0
+        else
+            info "发现新版本: v${latest_ver}，开始升级..."
+            return 1
+        fi
+    else
+        warn "无法获取最新版本信息，继续安装/覆盖当前版本"
+        return 1
+    fi
+}
+
 # ============== Agent 安装 ==============
 install_agent() {
     log "安装 gateway-agent..."
@@ -516,6 +563,11 @@ interactive_install() {
     echo ""
     
     detect_platform
+
+    # 版本检查：已安装时比较版本
+    if check_agent_up_to_date; then
+        return 0
+    fi
     
     # 选择角色
     echo "选择角色:"
@@ -776,34 +828,40 @@ HELPEOF
 
 # ============== 主入口 ==============
 show_menu() {
-    clear
-    echo "=========================================="
-    echo "    Gateway Agent 管理工具 (v1.0.5)"
-    echo "=========================================="
-    echo "  1) 安装 / 升级 Gateway Agent"
-    echo "  2) 查看运行状态 / 诊断 (status)"
-    echo "  3) 运行自检 (doctor)"
-    echo "  4) 卸载 Gateway Agent (清理残留)"
-    echo "  0) 退出"
-    echo "------------------------------------------"
-    printf "请选择 [0-4]: "
-    read -r choice
-    echo ""
+    while true; do
+        echo ""
+        echo "=========================================="
+        echo "    Gateway Agent 管理工具 (v1.0.5)"
+        echo "=========================================="
+        echo "  1) 安装 / 升级 Gateway Agent"
+        echo "  2) 查看运行状态 / 诊断 (status)"
+        echo "  3) 运行自检 (doctor)"
+        echo "  4) 卸载 Gateway Agent (清理残留)"
+        echo "  0) 退出"
+        echo "------------------------------------------"
+        printf "请选择 [0-4]: "
+        read -r choice
+        echo ""
 
-    case "$choice" in
-        1) interactive_install ;;
-        2) do_status ;;
-        3) 
-            if [ -x "$INSTALL_DIR/gateway-agent" ]; then
-                "$INSTALL_DIR/gateway-agent" doctor -c "$CONFIG_FILE"
-            else
-                error "Agent 未安装"
-            fi
-            ;;
-        4) do_uninstall ;;
-        0) exit 0 ;;
-        *) warn "无效选项"; sleep 1; show_menu ;;
-    esac
+        case "$choice" in
+            1) interactive_install || warn "操作未成功完成" ;;
+            2) do_status || warn "操作未成功完成" ;;
+            3) 
+                if [ -x "$INSTALL_DIR/gateway-agent" ]; then
+                    "$INSTALL_DIR/gateway-agent" doctor -c "$CONFIG_FILE" || warn "操作未成功完成"
+                else
+                    warn "Agent 未安装"
+                fi
+                ;;
+            4) do_uninstall || warn "操作未成功完成" ;;
+            0) echo "再见!"; exit 0 ;;
+            *) warn "无效选项，请重试" ;;
+        esac
+
+        echo ""
+        printf "${YELLOW}按 Enter 返回菜单...${NC}"
+        read -r _
+    done
 }
 
 main() {

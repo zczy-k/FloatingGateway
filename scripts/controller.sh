@@ -90,6 +90,28 @@ detect_platform() {
     log "平台: $PLATFORM ($ARCH)"
 }
 
+# ============== 版本检测 ==============
+get_installed_version() {
+    local binary="${INSTALL_DIR}/${CONTROLLER_NAME}"
+    if [ -x "$binary" ]; then
+        "$binary" version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1
+    fi
+}
+
+get_latest_version() {
+    local api_url="https://api.github.com/repos/zczy-k/FloatingGateway/releases/latest"
+    if [ -n "$GH_PROXY" ]; then
+        api_url="${GH_PROXY}${api_url}"
+    fi
+    local tag=""
+    if command -v curl >/dev/null 2>&1; then
+        tag=$(curl -sSL --connect-timeout 10 "$api_url" 2>/dev/null | grep '"tag_name"' | head -1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+')
+    elif command -v wget >/dev/null 2>&1; then
+        tag=$(wget -q --timeout=10 -O - "$api_url" 2>/dev/null | grep '"tag_name"' | head -1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+')
+    fi
+    echo "$tag"
+}
+
 # ============== 下载 ==============
 download_controller() {
     local binary_name="${CONTROLLER_NAME}-${PLATFORM}-${GOARCH}"
@@ -168,7 +190,7 @@ EOF
     
     chmod 600 "$CONFIG_FILE"
     log "已创建默认配置: $CONFIG_FILE"
-    info "请编辑配置文件后启动 Controller"
+    info "启动后可在 Web 界面中进行配置"
 }
 
 # ============== systemd 服务 (Linux) ==============
@@ -299,6 +321,27 @@ remove_procd_service() {
 # ============== 安装 ==============
 do_install() {
     detect_platform
+
+    # 版本检查：已安装时比较版本
+    local installed_ver
+    installed_ver=$(get_installed_version)
+    if [ -n "$installed_ver" ]; then
+        info "当前已安装版本: v${installed_ver}"
+        info "正在检查最新版本..."
+        local latest_ver
+        latest_ver=$(get_latest_version)
+        if [ -n "$latest_ver" ]; then
+            if [ "$installed_ver" = "$latest_ver" ]; then
+                log "已是最新版本 (v${latest_ver})，无需更新"
+                return 0
+            else
+                info "发现新版本: v${latest_ver}，开始升级..."
+            fi
+        else
+            warn "无法获取最新版本信息，继续安装/覆盖当前版本"
+        fi
+    fi
+
     download_controller
     create_default_config
     
@@ -312,9 +355,9 @@ do_install() {
     log "安装完成!"
     echo ""
     info "下一步:"
-    info "  1. 编辑配置文件: $CONFIG_FILE"
-    info "  2. 启动 Controller: $CONTROLLER_NAME serve -c $CONFIG_FILE"
-    info "  3. 打开浏览器访问: http://localhost:8080"
+    info "  1. 启动 Controller: $CONTROLLER_NAME serve -c $CONFIG_FILE"
+    info "  2. 打开浏览器访问: http://localhost:8080"
+    info "  3. 在 Web 界面中完成配置 (VIP、路由器等)"
 }
 
 # ============== 卸载 ==============
@@ -491,30 +534,35 @@ EOF
 
 # ============== 主入口 ==============
 show_menu() {
-    clear
-    printf "${BLUE}===============================================${NC}\n"
-      printf "${BLUE}      Gateway Controller 管理工具 (v1.0.5)      ${NC}\n"
+    while true; do
+        echo ""
+        printf "${BLUE}===============================================${NC}\n"
+        printf "${BLUE}      Gateway Controller 管理工具 (v1.0.5)      ${NC}\n"
+        printf "${BLUE}===============================================${NC}\n"
+        printf "  1) 安装 / 升级 Controller\n"
+        printf "  2) 启动 Controller 服务\n"
+        printf "  3) 停止 Controller 服务\n"
+        printf "  4) 查看服务状态 / 诊断\n"
+        printf "  5) 卸载 Controller (清理残留)\n"
+        printf "  0) 退出\n"
+        printf "${BLUE}-----------------------------------------------${NC}\n"
+        printf "请选择数字 [0-5]: "
+        read -r choice
 
-    printf "${BLUE}===============================================${NC}\n"
-    printf "  1) 安装 / 升级 Controller\n"
-    printf "  2) 启动 Controller 服务\n"
-    printf "  3) 停止 Controller 服务\n"
-    printf "  4) 查看服务状态 / 诊断\n"
-    printf "  5) 卸载 Controller (清理残留)\n"
-    printf "  0) 退出\n"
-    printf "${BLUE}-----------------------------------------------${NC}\n"
-    printf "请选择数字 [0-5]: "
-    read -r choice
+        case "$choice" in
+            1) do_install || warn "操作未成功完成" ;;
+            2) do_start || warn "操作未成功完成" ;;
+            3) do_stop || warn "操作未成功完成" ;;
+            4) do_status || warn "操作未成功完成" ;;
+            5) do_uninstall || warn "操作未成功完成" ;;
+            0) echo "再见!"; exit 0 ;;
+            *) warn "无效选项，请重试" ;;
+        esac
 
-    case "$choice" in
-        1) do_install ;;
-        2) do_start ;;
-        3) do_stop ;;
-        4) do_status ;;
-        5) do_uninstall ;;
-        0) exit 0 ;;
-        *) warn "无效选项，请重试"; sleep 1; show_menu ;;
-    esac
+        echo ""
+        printf "${YELLOW}按 Enter 返回菜单...${NC}"
+        read -r _
+    done
 }
 
 main() {
