@@ -98,10 +98,7 @@ const indexHTML = `<!DOCTYPE html>
                         </div>
                         <div class="form-group">
                             <label>主机地址 (IP)</label>
-                            <div class="input-row">
-                                <input type="text" name="host" required placeholder="192.168.1.1">
-                                <button type="button" class="btn btn-sm btn-ghost" id="btn-router-probe">探测</button>
-                            </div>
+                            <input type="text" name="host" required placeholder="192.168.1.1">
                         </div>
                         <div class="form-row">
                             <div class="form-group">
@@ -120,6 +117,13 @@ const indexHTML = `<!DOCTYPE html>
                         <div class="form-group">
                             <label>SSH 私钥文件路径</label>
                             <input type="text" name="key_file" placeholder="~/.ssh/id_rsa">
+                        </div>
+                        <div class="form-group" style="margin-top: 1rem;">
+                            <button type="button" class="btn btn-sm btn-ghost" id="btn-router-probe" style="width: 100%; justify-content: center; border-style: dashed; gap: 0.6rem;">
+                                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
+                                测试 SSH 连接并探测网络环境
+                            </button>
+                            <small class="form-hint" style="text-align: center;">点击后将尝试使用上方填写的信息登录路由器并自动获取网卡与网段</small>
                         </div>
                         <div class="form-group">
                             <label>角色</label>
@@ -545,6 +549,44 @@ section {
     flex-wrap: wrap;
 }
 
+/* Installation Progress */
+.install-progress {
+    margin-top: 0.75rem;
+    padding: 0.75rem;
+    background: var(--bg-input);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    font-family: 'SF Mono', 'Cascadia Code', 'Consolas', monospace;
+    font-size: 0.75rem;
+}
+
+.install-progress-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 0.5rem;
+    color: var(--text-secondary);
+    font-weight: 600;
+}
+
+.install-log-list {
+    max-height: 120px;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.install-log-item {
+    color: var(--text-muted);
+    white-space: pre-wrap;
+}
+
+.install-log-item:last-child {
+    color: var(--primary);
+    font-weight: 500;
+}
+
 /* Setup Guide (empty state) */
 .setup-guide {
     background: var(--bg-card);
@@ -960,6 +1002,7 @@ async function apiCall(endpoint, options = {}) {
 }
 
 // Status update
+let refreshTimer = null;
 async function refreshStatus() {
     try {
         const status = await apiCall('/status');
@@ -969,8 +1012,17 @@ async function refreshStatus() {
         
         routers = status.routers || [];
         renderRouters();
+
+        // If any router is installing/uninstalling, poll faster (every 2s)
+        const isBusy = routers.some(r => r.status === 'installing' || r.status === 'uninstalling');
+        const interval = isBusy ? 2000 : 30000;
+        
+        if (refreshTimer) clearTimeout(refreshTimer);
+        refreshTimer = setTimeout(refreshStatus, interval);
     } catch (e) {
         console.error('刷新状态失败:', e);
+        if (refreshTimer) clearTimeout(refreshTimer);
+        refreshTimer = setTimeout(refreshStatus, 30000);
     }
 }
 
@@ -1014,6 +1066,21 @@ function renderRouters() {
         };
         const statusText = statusTextMap[statusClass] || statusClass;
         
+        let progressHtml = '';
+        if ((statusClass === 'installing' || statusClass === 'uninstalling' || (statusClass === 'error' && router.install_log)) && router.install_log) {
+            const logs = router.install_log.map(line => '<div class="install-log-item">' + line + '</div>').join('');
+            progressHtml = 
+                '<div class="install-progress">' +
+                    '<div class="install-progress-header">' +
+                        '<span>执行进度</span>' +
+                        '<span class="loading-dots">...</span>' +
+                    '</div>' +
+                    '<div class="install-log-list" id="log-list-' + router.name + '">' +
+                        logs +
+                    '</div>' +
+                '</div>';
+        }
+
         card.innerHTML = 
             '<div class="router-card-header">' +
                 '<div>' +
@@ -1032,16 +1099,21 @@ function renderRouters() {
                 '<div><span class="label">VRRP状态:</span> ' + (vrrpHtml || '<span class="value">-</span>') + '</div>' +
                 '<div><span class="label">健康状态:</span> ' + (healthHtml || '<span class="value">-</span>') + '</div>' +
             '</div>' +
+            progressHtml +
             '<div class="router-actions">' +
                 '<button class="btn btn-sm" onclick="probeRouter(\'' + router.name + '\')">探测</button>' +
                 (router.agent_version 
                     ? '<button class="btn btn-sm" onclick="showDoctor(\'' + router.name + '\')">诊断</button>' +
                       '<button class="btn btn-sm btn-danger" onclick="uninstallRouter(\'' + router.name + '\')">卸载 Agent</button>'
-                    : '<button class="btn btn-sm btn-primary" onclick="installRouter(\'' + router.name + '\')">安装 Agent</button>') +
+                    : '<button class="btn btn-sm btn-primary" onclick="installRouter(\'' + router.name + '\')" ' + (statusClass === 'installing' ? 'disabled' : '') + '>安装 Agent</button>') +
                 '<button class="btn btn-sm btn-danger" onclick="deleteRouter(\'' + router.name + '\')">删除</button>' +
             '</div>';
         
         grid.appendChild(card);
+        
+        // Auto scroll logs to bottom
+        const logList = document.getElementById('log-list-' + router.name);
+        if (logList) logList.scrollTop = logList.scrollHeight;
     });
     
     if (routers.length === 0) {
@@ -1108,8 +1180,9 @@ async function installRouter(name) {
     try {
         await apiCall('/routers/' + name + '/install', { method: 'POST' });
         log('已开始安装: ' + name, 'success');
-        // Poll for completion
-        setTimeout(refreshStatus, 5000);
+        // Immediate refresh and trigger fast polling
+        if (refreshTimer) clearTimeout(refreshTimer);
+        refreshStatus();
     } catch (e) {
         log('安装失败: ' + e.message, 'error');
     }
@@ -1122,7 +1195,9 @@ async function uninstallRouter(name) {
     try {
         await apiCall('/routers/' + name + '/uninstall', { method: 'POST' });
         log('已开始卸载: ' + name, 'success');
-        setTimeout(refreshStatus, 3000);
+        // Immediate refresh and trigger fast polling
+        if (refreshTimer) clearTimeout(refreshTimer);
+        refreshStatus();
     } catch (e) {
         log('卸载失败: ' + e.message, 'error');
     }
@@ -1214,6 +1289,11 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!host) {
             alert('请先输入主机地址');
             return;
+        }
+        if (!password && !key_file) {
+            if (!confirm('你没有填写 SSH 密码或私钥路径，探测可能会因为权限不足而失败。是否继续？')) {
+                return;
+            }
         }
 
         const btn = $('#btn-router-probe');
