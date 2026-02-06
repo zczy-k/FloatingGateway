@@ -254,6 +254,11 @@ func (s *Server) handleRouterInstall(w http.ResponseWriter, r *http.Request, rou
 	agentConfig := s.manager.GenerateAgentConfig(router)
 
 	// Start installation in background
+	router.Status = StatusInstalling
+	router.InstallLog = nil
+	router.InstallStep = 0
+	router.InstallTotal = 10
+	router.Error = ""
 	go func() {
 		if err := s.manager.Install(router, agentConfig); err != nil {
 			router.Status = StatusError
@@ -275,6 +280,11 @@ func (s *Server) handleRouterUninstall(w http.ResponseWriter, r *http.Request, r
 	}
 
 	// Start uninstallation in background
+	router.Status = StatusUninstalling
+	router.InstallLog = nil
+	router.InstallStep = 0
+	router.InstallTotal = 5
+	router.Error = ""
 	go func() {
 		if err := s.manager.Uninstall(router); err != nil {
 			router.Status = StatusError

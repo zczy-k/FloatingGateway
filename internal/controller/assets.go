@@ -1082,23 +1082,26 @@ function renderRouters() {
         const statusText = statusTextMap[statusClass] || statusClass;
         
         let progressHtml = '';
-        if ((statusClass === 'installing' || statusClass === 'uninstalling' || (statusClass === 'error' && router.install_log)) && router.install_log) {
-            const step = router.install_step || 0;
-            const total = router.install_total || 1;
-            const pct = Math.round((step / total) * 100);
-            const logs = router.install_log.map(line => '<div class="install-log-item">' + line + '</div>').join('');
-            progressHtml = 
-                '<div class="install-progress">' +
-                    '<div class="install-progress-header">' +
-                        '<span>执行进度 ' + step + '/' + total + '</span>' +
-                        (statusClass !== 'error' ? '<span class="loading-dots">...</span>' : '<span style="color:var(--danger)">失败</span>') +
-                    '</div>' +
-                    '<div class="install-progress-bar"><div class="install-progress-fill" style="width:' + pct + '%"></div></div>' +
-                    '<div class="install-log-list" id="log-list-' + router.name + '">' +
-                        logs +
-                    '</div>' +
-                '</div>';
-        }
+         const showProgress = statusClass === 'installing' || statusClass === 'uninstalling' || (statusClass === 'error' && router.install_log && router.install_log.length > 0);
+         if (showProgress) {
+             const step = router.install_step || 0;
+             const total = router.install_total || 1;
+             const pct = Math.round((step / total) * 100);
+             const hasLogs = router.install_log && router.install_log.length > 0;
+             const logs = hasLogs ? router.install_log.map(line => '<div class="install-log-item">' + line + '</div>').join('') : '<div class="install-log-item" style="color:var(--warning)">正在准备...</div>';
+             const actionText = statusClass === 'uninstalling' ? '卸载' : '安装';
+             progressHtml = 
+                 '<div class="install-progress">' +
+                     '<div class="install-progress-header">' +
+                         '<span>' + actionText + '进度 ' + step + '/' + total + '</span>' +
+                         (statusClass === 'error' ? '<span style="color:var(--danger)">失败</span>' : '<span class="loading-dots">...</span>') +
+                     '</div>' +
+                     '<div class="install-progress-bar"><div class="install-progress-fill" style="width:' + pct + '%;' + (statusClass === 'error' ? 'background:var(--danger)' : '') + '"></div></div>' +
+                     '<div class="install-log-list" id="log-list-' + router.name + '">' +
+                         logs +
+                     '</div>' +
+                 '</div>';
+         }
 
         card.innerHTML = 
             '<div class="router-card-header">' +

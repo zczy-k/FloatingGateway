@@ -53,7 +53,7 @@ type Router struct {
 	VRRPState    string       `yaml:"-" json:"vrrp_state,omitempty"`
 	Healthy      *bool        `yaml:"-" json:"healthy,omitempty"`
 	Error        string       `yaml:"-" json:"error,omitempty"`
-	InstallLog   []string     `yaml:"-" json:"install_log,omitempty"`
+	InstallLog   []string     `yaml:"-" json:"install_log"`
 	InstallStep  int          `yaml:"-" json:"install_step"`
 	InstallTotal int          `yaml:"-" json:"install_total"`
 }
@@ -382,6 +382,7 @@ func (m *Manager) Install(r *Router, agentConfig *config.Config) error {
 	r.InstallStep = 0
 	r.InstallTotal = 10
 	r.Error = ""
+	r.Status = StatusInstalling
 
 	r.StepLog("正在连接到 " + r.Host + ":" + fmt.Sprintf("%d", r.Port) + "...")
 	client := NewSSHClient(m.sshConfig(r))
@@ -391,7 +392,6 @@ func (m *Manager) Install(r *Router, agentConfig *config.Config) error {
 	}
 	defer client.Close()
 
-	r.Status = StatusInstalling
 	r.AddLog("   连接成功")
 
 	// Detect platform
@@ -744,6 +744,7 @@ func (m *Manager) Uninstall(r *Router) error {
 	r.InstallStep = 0
 	r.InstallTotal = 5
 	r.Error = ""
+	r.Status = StatusUninstalling
 
 	r.StepLog(fmt.Sprintf("正在连接到 %s:%d...", r.Host, r.Port))
 	client := NewSSHClient(m.sshConfig(r))
@@ -753,7 +754,6 @@ func (m *Manager) Uninstall(r *Router) error {
 	}
 	defer client.Close()
 
-	r.Status = StatusUninstalling
 	r.AddLog("   连接成功")
 
 	r.StepLog("探测目标系统平台...")
