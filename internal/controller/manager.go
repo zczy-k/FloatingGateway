@@ -42,9 +42,9 @@ type Router struct {
 	Host       string       `yaml:"host" json:"host"`
 	Port       int          `yaml:"port" json:"port"`
 	User       string       `yaml:"user" json:"user"`
-	Password   string       `yaml:"password,omitempty" json:"-"`
+	Password   string       `yaml:"password,omitempty" json:"password,omitempty"`
 	KeyFile    string       `yaml:"key_file,omitempty" json:"key_file,omitempty"`
-	Passphrase string       `yaml:"passphrase,omitempty" json:"-"`
+	Passphrase string       `yaml:"passphrase,omitempty" json:"passphrase,omitempty"`
 	Role       config.Role  `yaml:"role" json:"role"`
 	Status     RouterStatus `yaml:"-" json:"status"`
 	Platform   Platform     `yaml:"-" json:"platform"`
@@ -53,6 +53,20 @@ type Router struct {
 	VRRPState  string       `yaml:"-" json:"vrrp_state,omitempty"`
 	Healthy    *bool        `yaml:"-" json:"healthy,omitempty"`
 	Error      string       `yaml:"-" json:"error,omitempty"`
+}
+
+// MarshalJSON customizes the JSON output to hide sensitive fields.
+func (r *Router) MarshalJSON() ([]byte, error) {
+	type Alias Router
+	return json.Marshal(&struct {
+		*Alias
+		Password   string `json:"password,omitempty"`
+		Passphrase string `json:"passphrase,omitempty"`
+	}{
+		Alias:      (*Alias)(r),
+		Password:   "", // Hide sensitive data in API responses
+		Passphrase: "",
+	})
 }
 
 // ControllerConfig holds controller configuration.

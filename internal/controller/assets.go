@@ -1208,6 +1208,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const host = form.host.value;
         const user = form.user.value;
         const password = form.password.value;
+        const key_file = form.key_file.value;
         const port = parseInt(form.port.value) || 22;
         
         if (!host) {
@@ -1225,7 +1226,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const result = await apiCall('/detect-net', { 
                 method: 'POST',
                 body: JSON.stringify({
-                    host, user, password, port
+                    host, user, password, key_file, port
                 })
             });
             log('探测成功: ' + result.iface + ' (' + result.cidr + ')', 'success');
