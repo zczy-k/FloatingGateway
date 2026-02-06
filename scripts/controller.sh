@@ -34,6 +34,25 @@ warn()  { printf "${YELLOW}[!]${NC} %s\n" "$1"; }
 error() { printf "${RED}[-]${NC} %s\n" "$1" >&2; exit 1; }
 info()  { printf "${BLUE}[*]${NC} %s\n" "$1"; }
 
+# ============== 工具函数 ==============
+get_local_ip() {
+    local ip=""
+    # 优先通过默认路由获取出口 IP
+    if command -v ip >/dev/null 2>&1; then
+        ip=$(ip route get 1.1.1.1 2>/dev/null | grep -oP 'src \K\S+' || true)
+    fi
+    # 回退: hostname -I (Linux)
+    if [ -z "$ip" ] && command -v hostname >/dev/null 2>&1; then
+        ip=$(hostname -I 2>/dev/null | awk '{print $1}' || true)
+    fi
+    # 回退: ifconfig
+    if [ -z "$ip" ] && command -v ifconfig >/dev/null 2>&1; then
+        ip=$(ifconfig 2>/dev/null | grep -E 'inet [0-9]' | grep -v '127.0.0.1' | head -1 | awk '{print $2}' | sed 's/addr://')
+    fi
+    # 最终回退
+    echo "${ip:-localhost}"
+}
+
 # ============== 平台检测 ==============
 PLATFORM=""
 ARCH=""
