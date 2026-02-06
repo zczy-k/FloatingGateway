@@ -100,10 +100,9 @@ const defaultDownloadBase = "https://github.com/zczy-k/FloatingGateway/releases/
 
 // GitHub 加速镜像列表，按优先级排列
 var ghProxies = []string{
-	"https://ghfast.top/",
-	"https://github.moeyy.xyz/",
+	"https://xuc.xi-xu.me/",
 	"https://gh-proxy.com/",
-	"https://ghproxy.net/",
+	"https://ghfast.top/",
 }
 
 // Manager handles router management operations.

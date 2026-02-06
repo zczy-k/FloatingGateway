@@ -6,7 +6,10 @@
 #   2. 远程运行:  bash <(curl -sSL https://raw.githubusercontent.com/zczy-k/FloatingGateway/main/setup.sh)
 #   3. 国内加速:  bash <(curl -sSL https://gh-proxy.com/https://raw.githubusercontent.com/zczy-k/FloatingGateway/main/setup.sh)
 
-GH_PROXY="${GH_PROXY:-}"  # 可通过环境变量预设，如 GH_PROXY=https://gh-proxy.com/
+GH_PROXY="${GH_PROXY:-}"  # 可通过环境变量预设
+
+# GitHub 加速镜像列表
+GH_PROXIES="https://xuc.xi-xu.me/ https://gh-proxy.com/ https://ghfast.top/"
 
 REPO_RAW_BASE="https://raw.githubusercontent.com/zczy-k/FloatingGateway/main"
 REPO_RELEASE_BASE="https://github.com/zczy-k/FloatingGateway/releases/latest/download"
@@ -36,7 +39,33 @@ download() {
     fi
 }
 
-# 检测 GitHub 连通性，自动启用代理
+# 测试代理速度并返回响应时间（毫秒），失败返回 9999
+test_proxy_speed() {
+    local proxy="$1"
+    local test_url="${proxy}https://raw.githubusercontent.com/zczy-k/FloatingGateway/main/README.md"
+    local start end elapsed
+    
+    start=$(date +%s%3N 2>/dev/null || date +%s)
+    if command -v curl >/dev/null 2>&1; then
+        if curl -sSL --connect-timeout 5 --max-time 10 "$test_url" -o /dev/null 2>/dev/null; then
+            end=$(date +%s%3N 2>/dev/null || date +%s)
+            elapsed=$((end - start))
+            echo "$elapsed"
+            return 0
+        fi
+    elif command -v wget >/dev/null 2>&1; then
+        if wget -q --timeout=10 "$test_url" -O /dev/null 2>/dev/null; then
+            end=$(date +%s%3N 2>/dev/null || date +%s)
+            elapsed=$((end - start))
+            echo "$elapsed"
+            return 0
+        fi
+    fi
+    echo "9999"
+    return 1
+}
+
+# 检测 GitHub 连通性，自动选择最快的加速镜像
 detect_proxy() {
     # 如果已经通过环境变量设置了代理，直接使用
     if [ -n "$GH_PROXY" ]; then
@@ -49,6 +78,7 @@ detect_proxy() {
     local tmp
     tmp=$(mktemp /tmp/fg-test-XXXXXX)
 
+    # 先测试直连
     if download "$test_url" "$tmp" 2>/dev/null && [ -s "$tmp" ]; then
         printf "${GREEN}[+]${NC} GitHub 直连正常\n"
         rm -f "$tmp"
@@ -56,9 +86,32 @@ detect_proxy() {
     fi
     rm -f "$tmp"
 
-    printf "${YELLOW}[!]${NC} GitHub 直连失败，尝试使用加速代理...\n"
-    GH_PROXY="https://gh-proxy.com/"
-    printf "${GREEN}[+]${NC} 已启用代理: ${GH_PROXY}\n"
+    printf "${YELLOW}[!]${NC} GitHub 直连失败，测试加速镜像...\n"
+    
+    local best_proxy=""
+    local best_time=9999
+    
+    for proxy in $GH_PROXIES; do
+        printf "${BLUE}[*]${NC} 测试: $proxy "
+        local time
+        time=$(test_proxy_speed "$proxy")
+        if [ "$time" -lt 9999 ]; then
+            printf "${GREEN}${time}ms${NC}\n"
+            if [ "$time" -lt "$best_time" ]; then
+                best_time="$time"
+                best_proxy="$proxy"
+            fi
+        else
+            printf "${RED}失败${NC}\n"
+        fi
+    done
+    
+    if [ -n "$best_proxy" ]; then
+        GH_PROXY="$best_proxy"
+        printf "${GREEN}[+]${NC} 选择最快镜像: ${GH_PROXY} (${best_time}ms)\n"
+    else
+        printf "${YELLOW}[!]${NC} 所有加速镜像均失败，将尝试直连\n"
+    fi
 }
 
 # 获取实际下载 URL（自动加代理前缀）

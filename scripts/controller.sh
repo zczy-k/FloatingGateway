@@ -176,31 +176,86 @@ get_latest_version() {
 }
 
 # ============== 下载 ==============
+# GitHub 加速镜像列表，按优先级排列
+GH_PROXIES="https://xuc.xi-xu.me/ https://gh-proxy.com/ https://ghfast.top/"
+
+# 通用下载函数：尝试加速镜像，最后用官方兜底
+# 参数: $1=文件URL, $2=保存路径
+download_with_proxy() {
+    local url="$1"
+    local target="$2"
+    local success=0
+    
+    # 先尝试加速镜像
+    for proxy in $GH_PROXIES; do
+        local proxy_url="${proxy}${url}"
+        info "尝试下载: $proxy_url"
+        
+        if command -v curl >/dev/null 2>&1; then
+            if sudo curl -sSL --connect-timeout 10 --max-time 120 "$proxy_url" -o "$target" 2>/dev/null || \
+               curl -sSL --connect-timeout 10 --max-time 120 "$proxy_url" -o "$target" 2>/dev/null; then
+                # 检查文件是否有效
+                if [ -f "$target" ] && [ -s "$target" ]; then
+                    log "下载成功 (使用加速: $proxy)"
+                    success=1
+                    break
+                fi
+            fi
+        elif command -v wget >/dev/null 2>&1; then
+            if sudo wget -q --timeout=120 "$proxy_url" -O "$target" 2>/dev/null || \
+               wget -q --timeout=120 "$proxy_url" -O "$target" 2>/dev/null; then
+                if [ -f "$target" ] && [ -s "$target" ]; then
+                    log "下载成功 (使用加速: $proxy)"
+                    success=1
+                    break
+                fi
+            fi
+        fi
+        warn "加速镜像失败: $proxy"
+    done
+    
+    # 加速镜像都失败，尝试直连官方
+    if [ "$success" -eq 0 ]; then
+        warn "所有加速镜像失败，尝试直连 GitHub..."
+        info "直连: $url"
+        
+        if command -v curl >/dev/null 2>&1; then
+            if sudo curl -sSL --connect-timeout 30 --max-time 300 "$url" -o "$target" 2>/dev/null || \
+               curl -sSL --connect-timeout 30 --max-time 300 "$url" -o "$target" 2>/dev/null; then
+                if [ -f "$target" ] && [ -s "$target" ]; then
+                    log "下载成功 (直连 GitHub)"
+                    success=1
+                fi
+            fi
+        elif command -v wget >/dev/null 2>&1; then
+            if sudo wget -q --timeout=300 "$url" -O "$target" 2>/dev/null || \
+               wget -q --timeout=300 "$url" -O "$target" 2>/dev/null; then
+                if [ -f "$target" ] && [ -s "$target" ]; then
+                    log "下载成功 (直连 GitHub)"
+                    success=1
+                fi
+            fi
+        fi
+    fi
+    
+    return $((1 - success))
+}
+
 download_controller() {
     local binary_name="${CONTROLLER_NAME}-${GOOS}-${GOARCH}"
     local url="${DOWNLOAD_BASE}/${binary_name}"
     local target="${INSTALL_DIR}/${CONTROLLER_NAME}"
     
     log "下载 $binary_name..."
-    info "URL: $url"
     
     # 创建安装目录
     if [ ! -d "$INSTALL_DIR" ]; then
         sudo mkdir -p "$INSTALL_DIR" 2>/dev/null || mkdir -p "$INSTALL_DIR"
     fi
     
-    # 下载
-    if command -v curl >/dev/null 2>&1; then
-        sudo curl -sSL "$url" -o "$target" 2>/dev/null || curl -sSL "$url" -o "$target"
-    elif command -v wget >/dev/null 2>&1; then
-        sudo wget -q "$url" -O "$target" 2>/dev/null || wget -q "$url" -O "$target"
-    else
-        error "需要 curl 或 wget"
-    fi
-    
-    # 检查文件是否下载成功
-    if [ ! -f "$target" ] || [ ! -s "$target" ]; then
-        error "下载失败: 文件为空或不存在"
+    # 使用加速下载
+    if ! download_with_proxy "$url" "$target"; then
+        error "下载失败: 所有下载源均不可用"
     fi
     
     sudo chmod +x "$target" 2>/dev/null || chmod +x "$target"
@@ -216,69 +271,6 @@ download_controller() {
     fi
     
     log "已安装到 $target"
-}
-
-# ============== 下载 Agent 二进制文件 ==============
-AGENT_DIR="${CONFIG_DIR}/agents"
-
-download_agents() {
-    # Agent 目标平台列表（controller 需要给各种架构的路由器部署 agent）
-    local agent_targets=(
-        "linux/amd64"
-        "linux/arm64"
-        "linux/arm"
-        "linux/mips"
-        "linux/mipsle"
-    )
-
-    mkdir -p "$AGENT_DIR"
-
-    local success=0
-    local failed=0
-
-    for target in "${agent_targets[@]}"; do
-        local os="${target%/*}"
-        local arch="${target#*/}"
-        local binary_name="gateway-agent-${os}-${arch}"
-        local url="${DOWNLOAD_BASE}/${binary_name}"
-        local dest="${AGENT_DIR}/${binary_name}"
-
-        # 如果已存在且非空，跳过
-        if [ -f "$dest" ] && [ -s "$dest" ]; then
-            info "已存在: ${binary_name}，跳过"
-            success=$((success + 1))
-            continue
-        fi
-
-        info "下载 ${binary_name}..."
-        if command -v curl >/dev/null 2>&1; then
-            if curl -sSL --connect-timeout 15 --fail "$url" -o "$dest" 2>/dev/null; then
-                chmod +x "$dest"
-                success=$((success + 1))
-            else
-                rm -f "$dest"
-                warn "下载失败: ${binary_name} (可能该架构尚未发布)"
-                failed=$((failed + 1))
-            fi
-        elif command -v wget >/dev/null 2>&1; then
-            if wget -q --timeout=15 "$url" -O "$dest" 2>/dev/null; then
-                chmod +x "$dest"
-                success=$((success + 1))
-            else
-                rm -f "$dest"
-                warn "下载失败: ${binary_name} (可能该架构尚未发布)"
-                failed=$((failed + 1))
-            fi
-        fi
-    done
-
-    if [ $success -eq 0 ]; then
-        warn "未能下载任何 Agent 二进制文件，远程安装 Agent 将不可用"
-        warn "你可以手动将 gateway-agent-<os>-<arch> 文件放到 ${AGENT_DIR}/ 目录"
-    else
-        log "Agent 二进制文件已就绪: ${success} 个成功, ${failed} 个失败"
-        info "存储位置: ${AGENT_DIR}/"
-    fi
 }
 
 # ============== 配置文件 ==============
@@ -464,7 +456,7 @@ remove_procd_service() {
 # ============== 安装 ==============
 do_install() {
     STEP_CURRENT=0
-    STEP_TOTAL=6
+    STEP_TOTAL=5
     echo ""
     printf "${BLUE}========== 安装 Gateway Controller ==========${NC}\n"
     echo ""
@@ -498,9 +490,6 @@ do_install() {
     step "下载并验证 Controller 二进制文件..."
     download_controller
 
-    step "下载 Agent 二进制文件 (用于远程部署)..."
-    download_agents
-
     step "生成默认配置文件..."
     create_default_config
     
@@ -518,6 +507,7 @@ do_install() {
     printf "${GREEN}============================================${NC}\n"
     echo ""
     info "下一步: 在菜单中选择 \"启动 Controller 服务\" 即可"
+    info "Agent 二进制文件将在安装到目标设备时按需下载"
 }
 
 # ============== 卸载 ==============
