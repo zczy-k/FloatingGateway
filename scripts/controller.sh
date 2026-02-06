@@ -286,6 +286,7 @@ After=network.target
 
 [Service]
 Type=simple
+WorkingDirectory=${INSTALL_DIR}
 ExecStart=${INSTALL_DIR}/${CONTROLLER_NAME} serve -c ${CONFIG_FILE} --no-browser
 Restart=on-failure
 RestartSec=5

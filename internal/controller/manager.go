@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"runtime"
 	"strings"
@@ -607,22 +608,40 @@ func (m *Manager) findAgentBinary(platform Platform, arch string) (string, error
 		"gateway-agent",
 	}
 
+	// Search relative to working dir AND relative to the executable itself
+	// (systemd may set working dir to / while binary is in /usr/local/bin)
 	searchDirs := []string{
 		".",
 		"./bin",
 		"./dist",
 	}
 
+	// Add executable's directory and its siblings
+	if exePath, err := os.Executable(); err == nil {
+		exeDir := filepath.Dir(exePath)
+		searchDirs = append(searchDirs,
+			exeDir,
+			filepath.Join(exeDir, "bin"),
+			filepath.Join(exeDir, "dist"),
+		)
+	}
+
+	// Also check common system install paths
+	searchDirs = append(searchDirs,
+		"/usr/local/bin",
+		"/usr/bin",
+	)
+
 	for _, dir := range searchDirs {
 		for _, pattern := range patterns {
-			path := fmt.Sprintf("%s/%s", dir, pattern)
+			path := filepath.Join(dir, pattern)
 			if _, err := os.Stat(path); err == nil {
 				return path, nil
 			}
 		}
 	}
 
-	return "", fmt.Errorf("no binary found for %s/%s (local GOOS=%s)", goos, goarch, runtime.GOOS)
+	return "", fmt.Errorf("未找到 %s/%s 的 Agent 二进制文件 (搜索了 %d 个目录，当前 GOOS=%s)", goos, goarch, len(searchDirs), runtime.GOOS)
 }
 
 // installKeepalived installs keepalived on the remote system.
