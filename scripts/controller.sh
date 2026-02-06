@@ -35,6 +35,22 @@ error() { printf "${RED}[-]${NC} %s\n" "$1" >&2; exit 1; }
 info()  { printf "${BLUE}[*]${NC} %s\n" "$1"; }
 
 # ============== 工具函数 ==============
+check_port() {
+    local port=8080
+    if [ -f "$CONFIG_FILE" ]; then
+        port=$(grep "listen:" "$CONFIG_FILE" | head -1 | awk '{print $2}' | tr -d '"' | cut -d: -f2)
+        port=${port:-8080}
+    fi
+    if command -v ss >/dev/null 2>&1; then
+        ss -tunlp | grep -q ":$port " && return 1
+    elif command -v netstat >/dev/null 2>&1; then
+        netstat -tunlp 2>/dev/null | grep -q ":$port " && return 1
+    elif command -v lsof >/dev/null 2>&1; then
+        lsof -i :"$port" -sTCP:LISTEN -t >/dev/null 2>&1 && return 1
+    fi
+    return 0
+}
+
 get_local_ip() {
     local ip=""
     # 优先通过默认路由获取出口 IP
@@ -225,8 +241,7 @@ After=network.target
 
 [Service]
 Type=simple
-User=$USER
-ExecStart=${INSTALL_DIR}/${CONTROLLER_NAME} serve -c ${CONFIG_FILE}
+ExecStart=${INSTALL_DIR}/${CONTROLLER_NAME} serve -c ${CONFIG_FILE} --no-browser
 Restart=on-failure
 RestartSec=5
 
@@ -418,26 +433,47 @@ do_uninstall() {
 do_start() {
     detect_platform
     
+    # 检查端口冲突
+    if ! check_port; then
+        warn "端口已被占用，请检查是否有其他服务（或旧的 Controller 实例）正在运行"
+    fi
+
     case "$INIT_SYSTEM" in
         systemd)
             sudo systemctl start gateway-controller
+            sleep 1
+            if ! systemctl is-active gateway-controller >/dev/null 2>&1; then
+                error "服务启动失败。可能原因：配置错误、端口占用。请运行 'journalctl -u gateway-controller' 查看详细日志"
+            fi
             ;;
         launchd)
             launchctl load "$LAUNCHD_PLIST"
             ;;
         procd)
             /etc/init.d/gateway-controller start
+            sleep 1
+            if ! /etc/init.d/gateway-controller status 2>/dev/null | grep -q running; then
+                error "服务启动失败。请查看 /var/log/messages 获取日志"
+            fi
             ;;
         *)
             # 直接运行
-            "${INSTALL_DIR}/${CONTROLLER_NAME}" serve -c "$CONFIG_FILE" &
+            if pgrep -f "gateway-controller serve" >/dev/null 2>&1; then
+                warn "Controller 已经在运行中"
+                return
+            fi
+            "${INSTALL_DIR}/${CONTROLLER_NAME}" serve -c "$CONFIG_FILE" --no-browser > "${CONFIG_DIR}/controller.log" 2>&1 &
             echo $! > "${CONFIG_DIR}/controller.pid"
+            sleep 1
+            if ! kill -0 $(cat "${CONFIG_DIR}/controller.pid") 2>/dev/null; then
+                error "服务启动失败。请查看 ${CONFIG_DIR}/controller.log 获取日志"
+            fi
             ;;
     esac
     
     local ip
     ip=$(get_local_ip)
-    log "Controller 已启动"
+    log "Controller 已成功启动"
     info "打开浏览器访问: http://${ip}:8080"
 }
 
@@ -494,21 +530,26 @@ do_status() {
             if systemctl is-active gateway-controller >/dev/null 2>&1; then
                 log "服务: 运行中 (systemd)"
             else
-                warn "服务: 未运行"
+                warn "服务: 未运行 (systemd)"
+                if ! check_port; then
+                    info "诊断: 检测到端口冲突，可能有其他服务占用了端口"
+                fi
+                info "诊断: 运行 'journalctl -u gateway-controller -n 20' 查看最近日志"
             fi
             ;;
         launchd)
             if launchctl list | grep -q "com.floatip.gateway-controller"; then
                 log "服务: 运行中 (launchd)"
             else
-                warn "服务: 未运行"
+                warn "服务: 未运行 (launchd)"
             fi
             ;;
         procd)
             if /etc/init.d/gateway-controller status 2>/dev/null | grep -q running; then
                 log "服务: 运行中 (procd)"
             else
-                warn "服务: 未运行"
+                warn "服务: 未运行 (procd)"
+                info "诊断: 运行 'logread -e gateway-controller' 查看日志"
             fi
             ;;
         *)
@@ -516,6 +557,10 @@ do_status() {
                 log "服务: 运行中"
             else
                 warn "服务: 未运行"
+                if [ -f "${CONFIG_DIR}/controller.log" ]; then
+                    info "诊断: 最近日志内容 (${CONFIG_DIR}/controller.log):"
+                    tail -n 5 "${CONFIG_DIR}/controller.log"
+                fi
             fi
             ;;
     esac

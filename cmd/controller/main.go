@@ -181,7 +181,11 @@ func serveCmd(args []string) {
 	}()
 
 	if err := server.Start(addr); err != nil {
-		fmt.Fprintf(os.Stderr, "服务器错误: %v\n", err)
+		if strings.Contains(err.Error(), "bind: address already in use") {
+			fmt.Fprintf(os.Stderr, "服务器错误: 端口 %s 已被占用。请使用 --listen 参数指定其他端口，或检查是否有其他实例正在运行。\n", addr)
+		} else {
+			fmt.Fprintf(os.Stderr, "服务器错误: %v\n", err)
+		}
 		os.Exit(1)
 	}
 }
