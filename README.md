@@ -32,12 +32,18 @@
 2. **直接双击运行**，程序会自动打开浏览器访问管理界面。
 
 #### **Linux / macOS / OpenWrt**
-使用一键交互脚本：
+一键运行交互式安装脚本（无需手动下载或赋权）：
 ```bash
-curl -O https://raw.githubusercontent.com/zczy-k/FloatingGateway/main/setup.sh
-chmod +x setup.sh
-./setup.sh  # 选择 "1) [管理端] Gateway Controller"
+bash <(curl -sSL https://raw.githubusercontent.com/zczy-k/FloatingGateway/main/setup.sh)
 ```
+
+**国内用户加速**（如果上面的命令下载缓慢或超时）：
+```bash
+bash <(curl -sSL https://gh-proxy.com/https://raw.githubusercontent.com/zczy-k/FloatingGateway/main/setup.sh)
+```
+> 脚本会自动检测 GitHub 连通性，国内网络下会自动启用代理加速，后续下载也会走加速通道。
+
+选择 `1) [管理端] Gateway Controller` 即可。
 
 ### 2. 在 Web UI 中部署 (三步走)
 1. **添加路由器**: 输入路由器的 IP 和 SSH 账号。点击 **“探测”**，系统会自动识别网卡并建议全局配置。
