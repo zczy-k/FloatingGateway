@@ -569,6 +569,21 @@ section {
     font-weight: 600;
 }
 
+.install-progress-bar {
+    height: 4px;
+    background: var(--border);
+    border-radius: 2px;
+    margin-bottom: 0.5rem;
+    overflow: hidden;
+}
+
+.install-progress-fill {
+    height: 100%;
+    background: var(--primary);
+    border-radius: 2px;
+    transition: width 0.4s ease;
+}
+
 .install-log-list {
     max-height: 120px;
     overflow-y: auto;
@@ -1068,13 +1083,17 @@ function renderRouters() {
         
         let progressHtml = '';
         if ((statusClass === 'installing' || statusClass === 'uninstalling' || (statusClass === 'error' && router.install_log)) && router.install_log) {
+            const step = router.install_step || 0;
+            const total = router.install_total || 1;
+            const pct = Math.round((step / total) * 100);
             const logs = router.install_log.map(line => '<div class="install-log-item">' + line + '</div>').join('');
             progressHtml = 
                 '<div class="install-progress">' +
                     '<div class="install-progress-header">' +
-                        '<span>执行进度</span>' +
-                        '<span class="loading-dots">...</span>' +
+                        '<span>执行进度 ' + step + '/' + total + '</span>' +
+                        (statusClass !== 'error' ? '<span class="loading-dots">...</span>' : '<span style="color:var(--danger)">失败</span>') +
                     '</div>' +
+                    '<div class="install-progress-bar"><div class="install-progress-fill" style="width:' + pct + '%"></div></div>' +
                     '<div class="install-log-list" id="log-list-' + router.name + '">' +
                         logs +
                     '</div>' +
@@ -1104,7 +1123,7 @@ function renderRouters() {
                 '<button class="btn btn-sm" onclick="probeRouter(\'' + router.name + '\')">探测</button>' +
                 (router.agent_version 
                     ? '<button class="btn btn-sm" onclick="showDoctor(\'' + router.name + '\')">诊断</button>' +
-                      '<button class="btn btn-sm btn-danger" onclick="uninstallRouter(\'' + router.name + '\')">卸载 Agent</button>'
+                      '<button class="btn btn-sm btn-danger" onclick="uninstallRouter(\'' + router.name + '\')" ' + (statusClass === 'uninstalling' ? 'disabled' : '') + '>卸载 Agent</button>'
                     : '<button class="btn btn-sm btn-primary" onclick="installRouter(\'' + router.name + '\')" ' + (statusClass === 'installing' ? 'disabled' : '') + '>安装 Agent</button>') +
                 '<button class="btn btn-sm btn-danger" onclick="deleteRouter(\'' + router.name + '\')">删除</button>' +
             '</div>';
@@ -1229,9 +1248,6 @@ document.addEventListener('DOMContentLoaded', () => {
     // Initial load
     refreshStatus();
     log('控制台已加载');
-    
-    // Auto refresh every 30s
-    setInterval(refreshStatus, 30000);
     
     // Add router button
     $('#btn-add-router').addEventListener('click', () => {

@@ -38,22 +38,24 @@ const (
 
 // Router represents a managed router.
 type Router struct {
-	Name       string       `yaml:"name" json:"name"`
-	Host       string       `yaml:"host" json:"host"`
-	Port       int          `yaml:"port" json:"port"`
-	User       string       `yaml:"user" json:"user"`
-	Password   string       `yaml:"password,omitempty" json:"password,omitempty"`
-	KeyFile    string       `yaml:"key_file,omitempty" json:"key_file,omitempty"`
-	Passphrase string       `yaml:"passphrase,omitempty" json:"passphrase,omitempty"`
-	Role       config.Role  `yaml:"role" json:"role"`
-	Status     RouterStatus `yaml:"-" json:"status"`
-	Platform   Platform     `yaml:"-" json:"platform"`
-	LastSeen   time.Time    `yaml:"-" json:"last_seen,omitempty"`
-	AgentVer   string       `yaml:"-" json:"agent_version,omitempty"`
-	VRRPState  string       `yaml:"-" json:"vrrp_state,omitempty"`
-	Healthy    *bool        `yaml:"-" json:"healthy,omitempty"`
-	Error      string       `yaml:"-" json:"error,omitempty"`
-	InstallLog []string     `yaml:"-" json:"install_log,omitempty"`
+	Name         string       `yaml:"name" json:"name"`
+	Host         string       `yaml:"host" json:"host"`
+	Port         int          `yaml:"port" json:"port"`
+	User         string       `yaml:"user" json:"user"`
+	Password     string       `yaml:"password,omitempty" json:"password,omitempty"`
+	KeyFile      string       `yaml:"key_file,omitempty" json:"key_file,omitempty"`
+	Passphrase   string       `yaml:"passphrase,omitempty" json:"passphrase,omitempty"`
+	Role         config.Role  `yaml:"role" json:"role"`
+	Status       RouterStatus `yaml:"-" json:"status"`
+	Platform     Platform     `yaml:"-" json:"platform"`
+	LastSeen     time.Time    `yaml:"-" json:"last_seen,omitempty"`
+	AgentVer     string       `yaml:"-" json:"agent_version,omitempty"`
+	VRRPState    string       `yaml:"-" json:"vrrp_state,omitempty"`
+	Healthy      *bool        `yaml:"-" json:"healthy,omitempty"`
+	Error        string       `yaml:"-" json:"error,omitempty"`
+	InstallLog   []string     `yaml:"-" json:"install_log,omitempty"`
+	InstallStep  int          `yaml:"-" json:"install_step"`
+	InstallTotal int          `yaml:"-" json:"install_total"`
 }
 
 // MarshalJSON customizes the JSON output to hide sensitive fields.
@@ -362,122 +364,138 @@ func (m *Manager) ProbeAll() {
 // AddLog adds a log entry to the router's installation log.
 func (r *Router) AddLog(msg string) {
 	r.InstallLog = append(r.InstallLog, fmt.Sprintf("[%s] %s", time.Now().Format("15:04:05"), msg))
-	// Keep only last 20 entries
-	if len(r.InstallLog) > 20 {
-		r.InstallLog = r.InstallLog[len(r.InstallLog)-20:]
+	// Keep only last 30 entries
+	if len(r.InstallLog) > 30 {
+		r.InstallLog = r.InstallLog[len(r.InstallLog)-30:]
 	}
+}
+
+// StepLog advances the step counter and adds a log entry.
+func (r *Router) StepLog(msg string) {
+	r.InstallStep++
+	r.AddLog(fmt.Sprintf("(%d/%d) %s", r.InstallStep, r.InstallTotal, msg))
 }
 
 // Install installs the agent on a router.
 func (m *Manager) Install(r *Router, agentConfig *config.Config) error {
-	r.InstallLog = nil // Clear old logs
-	r.AddLog("开始安装过程...")
-	
+	r.InstallLog = nil
+	r.InstallStep = 0
+	r.InstallTotal = 10
+	r.Error = ""
+
+	r.StepLog("正在连接到 " + r.Host + ":" + fmt.Sprintf("%d", r.Port) + "...")
 	client := NewSSHClient(m.sshConfig(r))
-	r.AddLog(fmt.Sprintf("正在连接到 %s:%d...", r.Host, r.Port))
 	if err := client.Connect(); err != nil {
-		r.AddLog("连接失败: " + err.Error())
+		r.AddLog("!! 连接失败: " + err.Error())
 		return fmt.Errorf("connect: %w", err)
 	}
 	defer client.Close()
 
 	r.Status = StatusInstalling
-	r.AddLog("连接成功")
+	r.AddLog("   连接成功")
 
 	// Detect platform
-	r.AddLog("正在探测目标系统平台...")
+	r.StepLog("探测目标系统平台...")
 	platform := m.detectPlatform(client)
 	r.Platform = platform
-	r.AddLog(fmt.Sprintf("检测到平台: %s", platform))
+	r.AddLog("   平台: " + string(platform))
 
 	// Determine target architecture
-	r.AddLog("正在探测系统架构...")
+	r.StepLog("探测系统架构...")
 	arch, err := client.RunCombined("uname -m")
 	if err != nil {
-		r.AddLog("架构探测失败: " + err.Error())
+		r.AddLog("!! 架构探测失败: " + err.Error())
 		return fmt.Errorf("detect arch: %w", err)
 	}
 	arch = strings.TrimSpace(arch)
-	r.AddLog(fmt.Sprintf("系统架构: %s", arch))
+
+	// For MIPS, auto-detect endianness if uname just returns "mips"
+	if arch == "mips" {
+		if endian, err := client.RunCombined("echo -n I | hexdump -o | head -n1 | awk '{print $2}'"); err == nil {
+			endian = strings.TrimSpace(endian)
+			if endian == "0000049" { // little-endian
+				arch = "mipsle"
+				r.AddLog("   检测到 MIPS 小端序 (little-endian)")
+			} else {
+				r.AddLog("   检测到 MIPS 大端序 (big-endian)")
+			}
+		}
+	}
+	r.AddLog("   架构: " + arch)
 
 	// Find appropriate binary
-	r.AddLog("正在查找适配的 Agent 二进制文件...")
+	r.StepLog("查找适配的 Agent 二进制文件...")
 	binPath, err := m.findAgentBinary(platform, arch)
 	if err != nil {
-		r.AddLog("未找到适配的二进制文件")
+		r.AddLog("!! 未找到适配的二进制文件: " + err.Error())
 		return fmt.Errorf("find binary: %w", err)
 	}
-	r.AddLog(fmt.Sprintf("找到二进制文件: %s", binPath))
+	r.AddLog("   使用: " + binPath)
 
-	// Read binary
-	r.AddLog("正在准备上传二进制文件...")
+	// Read and upload binary
+	r.StepLog("上传 Agent 到目标设备 (可能需要等待)...")
 	binData, err := os.ReadFile(binPath)
 	if err != nil {
-		r.AddLog("读取二进制文件失败")
+		r.AddLog("!! 读取二进制文件失败: " + err.Error())
 		return fmt.Errorf("read binary: %w", err)
 	}
-
-	// Create config directory
-	r.AddLog("正在创建配置目录 /etc/gateway-agent...")
 	if err := client.MkdirAll("/etc/gateway-agent"); err != nil {
-		r.AddLog("创建目录失败")
+		r.AddLog("!! 创建目录失败: " + err.Error())
 		return fmt.Errorf("create config dir: %w", err)
 	}
-
-	// Upload binary
-	r.AddLog("正在上传二进制文件到 /usr/bin/gateway-agent (可能需要一些时间)...")
 	if err := client.WriteFile("/usr/bin/gateway-agent", binData, 0755); err != nil {
-		r.AddLog("上传失败: " + err.Error())
+		r.AddLog("!! 上传失败: " + err.Error())
 		return fmt.Errorf("upload binary: %w", err)
 	}
-	r.AddLog("二进制文件上传成功")
+	r.AddLog("   上传成功")
 
 	// Generate and upload config
-	r.AddLog("正在生成并上传配置文件...")
+	r.StepLog("生成并上传配置文件...")
 	agentConfig.Role = r.Role
 	configData, err := agentConfig.ToYAML()
 	if err != nil {
-		r.AddLog("生成配置失败")
+		r.AddLog("!! 生成配置失败: " + err.Error())
 		return fmt.Errorf("generate config: %w", err)
 	}
-
 	if err := client.WriteFile("/etc/gateway-agent/config.yaml", configData, 0644); err != nil {
-		r.AddLog("上传配置失败")
+		r.AddLog("!! 上传配置失败: " + err.Error())
 		return fmt.Errorf("upload config: %w", err)
 	}
+	r.AddLog("   配置已写入")
 
 	// Install keepalived
-	r.AddLog("正在检查并安装 Keepalived 依赖...")
+	r.StepLog("安装 Keepalived 依赖...")
 	if err := m.installKeepalived(client, platform); err != nil {
-		r.AddLog("安装 Keepalived 失败: " + err.Error())
+		r.AddLog("!! 安装 Keepalived 失败: " + err.Error())
 		return fmt.Errorf("install keepalived: %w", err)
 	}
-	r.AddLog("Keepalived 准备就绪")
+	r.AddLog("   Keepalived 就绪")
 
-	// Apply agent config (generates keepalived.conf)
-	r.AddLog("正在初始化 Agent 配置...")
+	// Apply agent config
+	r.StepLog("初始化 Agent 配置...")
 	if _, err := client.RunCombined("gateway-agent apply"); err != nil {
-		r.AddLog("初始化失败: " + err.Error())
+		r.AddLog("!! 初始化失败: " + err.Error())
 		return fmt.Errorf("apply config: %w", err)
 	}
 
 	// Setup service
-	r.AddLog("正在配置并启动服务...")
+	r.StepLog("配置并启动系统服务...")
 	if err := m.setupService(client, platform); err != nil {
-		r.AddLog("配置服务失败: " + err.Error())
+		r.AddLog("!! 服务配置失败: " + err.Error())
 		return fmt.Errorf("setup service: %w", err)
 	}
-	r.AddLog("服务启动成功")
+	r.AddLog("   服务已启动")
 
 	// Setup firewall
-	r.AddLog("正在配置防火墙规则...")
+	r.StepLog("配置防火墙规则...")
 	if err := m.setupFirewall(client, platform); err != nil {
-		r.AddLog("警告: 防火墙配置失败 (不影响核心功能): " + err.Error())
+		r.AddLog("   警告: 防火墙配置失败 (不影响核心功能)")
 	} else {
-		r.AddLog("防火墙规则配置完成")
+		r.AddLog("   防火墙规则已配置")
 	}
 
-	r.AddLog("安装全部完成！")
+	r.InstallStep = r.InstallTotal
+	r.AddLog("安装全部完成!")
 	r.Status = StatusOnline
 	return nil
 }
@@ -723,25 +741,27 @@ WantedBy=multi-user.target
 // Uninstall removes the agent from a router.
 func (m *Manager) Uninstall(r *Router) error {
 	r.InstallLog = nil
-	r.AddLog("开始卸载过程...")
+	r.InstallStep = 0
+	r.InstallTotal = 5
+	r.Error = ""
 
+	r.StepLog(fmt.Sprintf("正在连接到 %s:%d...", r.Host, r.Port))
 	client := NewSSHClient(m.sshConfig(r))
-	r.AddLog(fmt.Sprintf("正在连接到 %s:%d...", r.Host, r.Port))
 	if err := client.Connect(); err != nil {
-		r.AddLog("连接失败: " + err.Error())
+		r.AddLog("!! 连接失败: " + err.Error())
 		return fmt.Errorf("connect: %w", err)
 	}
 	defer client.Close()
 
 	r.Status = StatusUninstalling
-	r.AddLog("连接成功")
+	r.AddLog("   连接成功")
 
-	r.AddLog("正在探测目标系统平台...")
+	r.StepLog("探测目标系统平台...")
 	platform := m.detectPlatform(client)
-	r.AddLog(fmt.Sprintf("目标平台: %s", platform))
+	r.AddLog("   平台: " + string(platform))
 
 	// Stop services
-	r.AddLog("正在停止并禁用 Agent 服务...")
+	r.StepLog("停止并禁用 Agent 服务...")
 	switch platform {
 	case PlatformOpenWrt:
 		client.RunCombined("/etc/init.d/gateway-agent stop")
@@ -753,18 +773,21 @@ func (m *Manager) Uninstall(r *Router) error {
 		client.RemoveFile("/etc/systemd/system/gateway-agent.service")
 		client.RunCombined("systemctl daemon-reload")
 	}
-	r.AddLog("服务已停止并移除")
+	r.AddLog("   服务已停止并移除")
 
 	// Remove files
-	r.AddLog("正在清理程序文件和配置...")
+	r.StepLog("清理程序文件和配置...")
 	client.RemoveFile("/usr/bin/gateway-agent")
 	client.RunCombined("rm -rf /etc/gateway-agent")
+	r.AddLog("   文件已清理")
 
 	// Restore keepalived default config
-	r.AddLog("正在停止 Keepalived 服务...")
+	r.StepLog("停止 Keepalived 服务...")
 	client.RunCombined("systemctl stop keepalived 2>/dev/null || /etc/init.d/keepalived stop 2>/dev/null")
+	r.AddLog("   Keepalived 已停止")
 
-	r.AddLog("卸载全部完成！")
+	r.InstallStep = r.InstallTotal
+	r.AddLog("卸载全部完成!")
 	r.Status = StatusOnline
 	r.AgentVer = ""
 	r.VRRPState = ""
