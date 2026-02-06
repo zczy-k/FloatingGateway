@@ -73,7 +73,16 @@ get_local_ip() {
 PLATFORM=""
 ARCH=""
 GOARCH=""
+GOOS=""
 INIT_SYSTEM=""
+STEP_CURRENT=0
+STEP_TOTAL=0
+
+# 带步骤号的日志输出
+step() {
+    STEP_CURRENT=$((STEP_CURRENT + 1))
+    printf "${GREEN}[${STEP_CURRENT}/${STEP_TOTAL}]${NC} %s\n" "$1"
+}
 
 detect_platform() {
     local os
@@ -117,12 +126,31 @@ detect_platform() {
         x86_64|amd64) GOARCH="amd64" ;;
         aarch64|arm64) GOARCH="arm64" ;;
         armv7l|armv6l) GOARCH="arm" ;;
-        mips) GOARCH="mips" ;;
+        mips)
+            GOARCH="mips"
+            # 自动检测 MIPS 字节序
+            if command -v hexdump >/dev/null 2>&1; then
+                local endian
+                endian=$(echo -n I | hexdump -o | head -n1 | awk '{print $2}')
+                if [ "$endian" = "0000049" ]; then
+                    GOARCH="mipsle"
+                    info "检测到 MIPS 小端序 (little-endian)"
+                else
+                    info "检测到 MIPS 大端序 (big-endian)"
+                fi
+            fi
+            ;;
         mipsel|mipsle) GOARCH="mipsle" ;;
         *) error "不支持的架构: $ARCH" ;;
     esac
     
-    log "平台: $PLATFORM ($ARCH)"
+    # 下载用的 OS 名称: openwrt 也用 linux 二进制
+    case "$os" in
+        linux)  GOOS="linux" ;;
+        darwin) GOOS="darwin" ;;
+    esac
+    
+    log "平台: $PLATFORM ($ARCH -> ${GOOS}/${GOARCH})"
 }
 
 # ============== 版本检测 ==============
@@ -149,11 +177,12 @@ get_latest_version() {
 
 # ============== 下载 ==============
 download_controller() {
-    local binary_name="${CONTROLLER_NAME}-${PLATFORM}-${GOARCH}"
+    local binary_name="${CONTROLLER_NAME}-${GOOS}-${GOARCH}"
     local url="${DOWNLOAD_BASE}/${binary_name}"
     local target="${INSTALL_DIR}/${CONTROLLER_NAME}"
     
     log "下载 $binary_name..."
+    info "URL: $url"
     
     # 创建安装目录
     if [ ! -d "$INSTALL_DIR" ]; then
@@ -169,7 +198,23 @@ download_controller() {
         error "需要 curl 或 wget"
     fi
     
+    # 检查文件是否下载成功
+    if [ ! -f "$target" ] || [ ! -s "$target" ]; then
+        error "下载失败: 文件为空或不存在"
+    fi
+    
     sudo chmod +x "$target" 2>/dev/null || chmod +x "$target"
+    
+    # 验证二进制文件是否可执行 (防止 Exec format error)
+    if ! "$target" version >/dev/null 2>&1; then
+        local file_info=""
+        if command -v file >/dev/null 2>&1; then
+            file_info=$(file "$target")
+        fi
+        sudo rm -f "$target" 2>/dev/null || rm -f "$target"
+        error "二进制文件验证失败 (Exec format error)!\n  当前系统: $(uname -s) $(uname -m)\n  下载目标: ${GOOS}/${GOARCH}\n  文件信息: ${file_info}\n  请确认下载源中有对应平台的二进制文件"
+    fi
+    
     log "已安装到 $target"
 }
 
@@ -354,9 +399,17 @@ remove_procd_service() {
 
 # ============== 安装 ==============
 do_install() {
+    STEP_CURRENT=0
+    STEP_TOTAL=5
+    echo ""
+    printf "${BLUE}========== 安装 Gateway Controller ==========${NC}\n"
+    echo ""
+
+    step "检测系统平台与架构..."
     detect_platform
 
     # 版本检查：已安装时比较版本
+    step "检查已安装版本..."
     local installed_ver
     installed_ver=$(get_installed_version)
     if [ -n "$installed_ver" ]; then
@@ -374,30 +427,45 @@ do_install() {
         else
             warn "无法获取最新版本信息，继续安装/覆盖当前版本"
         fi
+    else
+        info "未检测到已安装版本，执行全新安装"
     fi
 
+    step "下载并验证二进制文件..."
     download_controller
+
+    step "生成默认配置文件..."
     create_default_config
     
+    step "配置系统服务..."
     case "$INIT_SYSTEM" in
         systemd) setup_systemd_service ;;
         launchd) setup_launchd_service ;;
         procd) setup_procd_service ;;
+        *) warn "未识别的 init 系统，跳过服务配置" ;;
     esac
     
     echo ""
-    log "安装完成!"
+    printf "${GREEN}============================================${NC}\n"
+    log "安装完成! (${STEP_TOTAL}/${STEP_TOTAL} 步骤)"
+    printf "${GREEN}============================================${NC}\n"
     echo ""
     info "下一步: 在菜单中选择 \"启动 Controller 服务\" 即可"
 }
 
 # ============== 卸载 ==============
 do_uninstall() {
+    STEP_CURRENT=0
+    STEP_TOTAL=4
+    echo ""
+    printf "${BLUE}========== 卸载 Gateway Controller ==========${NC}\n"
+    echo ""
+
+    step "检测系统平台..."
     detect_platform
     
-    log "开始卸载 Gateway Controller..."
-    
     # 停止并移除服务
+    step "停止并移除系统服务..."
     case "$INIT_SYSTEM" in
         systemd) remove_systemd_service ;;
         launchd) remove_launchd_service ;;
@@ -405,13 +473,17 @@ do_uninstall() {
     esac
     
     # 删除二进制
+    step "删除程序文件..."
     local binary="${INSTALL_DIR}/${CONTROLLER_NAME}"
     if [ -f "$binary" ]; then
         sudo rm -f "$binary" 2>/dev/null || rm -f "$binary"
         log "已删除: $binary"
+    else
+        info "程序文件不存在，跳过"
     fi
     
     # 询问是否删除配置
+    step "清理配置文件..."
     if [ -d "$CONFIG_DIR" ]; then
         printf "是否删除配置目录 $CONFIG_DIR? [y/N]: "
         read -r confirm
@@ -424,19 +496,38 @@ do_uninstall() {
                 info "保留配置目录: $CONFIG_DIR"
                 ;;
         esac
+    else
+        info "配置目录不存在，跳过"
     fi
     
-    log "卸载完成"
+    echo ""
+    printf "${GREEN}============================================${NC}\n"
+    log "卸载完成! (${STEP_TOTAL}/${STEP_TOTAL} 步骤)"
+    printf "${GREEN}============================================${NC}\n"
 }
 
 # ============== 启动/停止/状态 ==============
 do_start() {
+    STEP_CURRENT=0
+    STEP_TOTAL=3
+    echo ""
+
+    step "检测系统平台..."
     detect_platform
     
+    # 检查二进制是否存在
+    local binary="${INSTALL_DIR}/${CONTROLLER_NAME}"
+    if [ ! -x "$binary" ]; then
+        error "Controller 未安装，请先选择 \"安装 / 升级\" 选项"
+    fi
+
+    step "检查端口占用..."
     # 检查端口冲突
     if ! check_port; then
         warn "端口已被占用，请检查是否有其他服务（或旧的 Controller 实例）正在运行"
     fi
+
+    step "启动服务..."
 
     case "$INIT_SYSTEM" in
         systemd)

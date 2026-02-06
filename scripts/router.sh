@@ -71,7 +71,20 @@ detect_platform() {
         x86_64|amd64) GOARCH="amd64" ;;
         aarch64|arm64) GOARCH="arm64" ;;
         armv7l|armv6l) GOARCH="arm" ;;
-        mips) GOARCH="mips" ;;
+        mips)
+            GOARCH="mips"
+            # 自动检测 MIPS 字节序
+            if command -v hexdump >/dev/null 2>&1; then
+                local endian
+                endian=$(echo -n I | hexdump -o | head -n1 | awk '{print $2}')
+                if [ "$endian" = "0000049" ]; then
+                    GOARCH="mipsle"
+                    info "检测到 MIPS 小端序 (little-endian)"
+                else
+                    info "检测到 MIPS 大端序 (big-endian)"
+                fi
+            fi
+            ;;
         mipsel|mipsle) GOARCH="mipsle" ;;
         *) error "不支持的架构: $ARCH" ;;
     esac
