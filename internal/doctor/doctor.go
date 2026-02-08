@@ -250,16 +250,49 @@ func (d *Doctor) checkKeepalived() CheckResult {
 
 	if !keepalived.IsRunning() {
 		result.Status = "error"
-		result.Message = "keepalived is not running"
 		result.CanFix = true
+		
+		// Try to get more details about why it's not running
+		var details []string
+		
+		// Check if keepalived is installed
+		if !exec.CommandExists("keepalived") {
+			details = append(details, "keepalived 未安装")
+		} else {
+			// Check if config exists
+			configPath := keepalived.FindConfigPath()
+			if _, err := os.Stat(configPath); os.IsNotExist(err) {
+				details = append(details, fmt.Sprintf("配置文件不存在: %s", configPath))
+			} else {
+				// Try to validate config
+				validateResult := exec.RunWithTimeout("keepalived", 5*time.Second, "-t", "-f", configPath)
+				if !validateResult.Success() {
+					details = append(details, fmt.Sprintf("配置文件无效: %s", strings.TrimSpace(validateResult.Combined())))
+				}
+			}
+			
+			// Check if service is enabled
+			if d.platform.ServiceManager == "systemd" {
+				enabledResult := exec.Run("systemctl", "is-enabled", "keepalived")
+				if !enabledResult.Success() {
+					details = append(details, "服务未启用（disabled）")
+				}
+			}
+		}
+		
+		if len(details) > 0 {
+			result.Message = fmt.Sprintf("keepalived 未运行。原因: %s", strings.Join(details, "; "))
+		} else {
+			result.Message = "keepalived 未运行"
+		}
 
 		if d.autoFix {
 			if err := keepalived.Start(); err == nil {
 				result.Fixed = true
 				result.Status = "ok"
-				result.Message = "keepalived was not running, started successfully"
+				result.Message = "keepalived 已启动"
 			} else {
-				result.Message = fmt.Sprintf("keepalived is not running, failed to start: %v", err)
+				result.Message = fmt.Sprintf("%s。尝试启动失败: %v", result.Message, err)
 			}
 		}
 		return result
@@ -276,16 +309,16 @@ func (d *Doctor) checkKeepalviedConfig() CheckResult {
 	configPath := keepalived.FindConfigPath()
 	if _, err := os.Stat(configPath); os.IsNotExist(err) {
 		result.Status = "error"
-		result.Message = fmt.Sprintf("keepalived config not found at %s", configPath)
+		result.Message = fmt.Sprintf("配置文件不存在: %s。请运行 'gateway-agent apply' 生成配置", configPath)
 		result.CanFix = true
 
 		if d.autoFix {
 			if err := keepalived.Apply(d.cfg); err == nil {
 				result.Fixed = true
 				result.Status = "ok"
-				result.Message = "keepalived config was missing, generated and applied"
+				result.Message = "配置文件已生成并应用"
 			} else {
-				result.Message = fmt.Sprintf("failed to generate keepalived config: %v", err)
+				result.Message = fmt.Sprintf("配置文件不存在，生成失败: %v", err)
 			}
 		}
 		return result
@@ -294,22 +327,38 @@ func (d *Doctor) checkKeepalviedConfig() CheckResult {
 	// Validate config
 	validateResult := exec.RunWithTimeout("keepalived", 5*time.Second, "-t", "-f", configPath)
 	if !validateResult.Success() {
+		errMsg := strings.TrimSpace(validateResult.Combined())
+		
+		// Analyze common errors
+		var suggestion string
+		if strings.Contains(errMsg, "track script") && strings.Contains(errMsg, "not found") {
+			suggestion = "健康检查脚本路径错误。请确认 gateway-agent 已安装到 /usr/bin/gateway-agent"
+		} else if strings.Contains(errMsg, "interface") && strings.Contains(errMsg, "doesn't exist") {
+			suggestion = "网卡接口不存在。请检查配置文件中的 interface 设置"
+		} else if strings.Contains(errMsg, "unicast_src_ip") {
+			suggestion = "缺少 unicast_src_ip 配置。请运行 'gateway-agent apply' 重新生成配置"
+		} else {
+			suggestion = "请运行 'gateway-agent apply' 重新生成配置"
+		}
+		
 		result.Status = "error"
-		result.Message = fmt.Sprintf("keepalived config is invalid: %s", validateResult.Combined())
+		result.Message = fmt.Sprintf("配置文件无效: %s。建议: %s", errMsg, suggestion)
 		result.CanFix = true
 
 		if d.autoFix {
 			if err := keepalived.Apply(d.cfg); err == nil {
 				result.Fixed = true
 				result.Status = "ok"
-				result.Message = "keepalived config was invalid, regenerated and applied"
+				result.Message = "配置文件已重新生成并应用"
+			} else {
+				result.Message = fmt.Sprintf("%s。重新生成失败: %v", result.Message, err)
 			}
 		}
 		return result
 	}
 
 	result.Status = "ok"
-	result.Message = fmt.Sprintf("keepalived config at %s is valid", configPath)
+	result.Message = fmt.Sprintf("配置文件有效: %s", configPath)
 	return result
 }
 
