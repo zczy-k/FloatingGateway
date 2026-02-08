@@ -341,26 +341,22 @@ func (m *Manager) getInterfaceIP(client *SSHClient, iface string) (string, error
 
 // DetectNetwork tries to find the interface and CIDR for a given IP on the remote host.
 func (m *Manager) DetectNetwork(client *SSHClient, targetIP string) (iface, cidr string, err error) {
-	// Try to get default interface
-	out, err := client.RunCombined("ip route get 8.8.8.8 2>&1")
-	if err != nil || out == "" {
-		out, err = client.RunCombined("ip route show default 2>&1 | head -n 1")
-	}
-
-	if err == nil && out != "" {
-		fields := strings.Fields(out)
-		for i, f := range fields {
-			if f == "dev" && i+1 < len(fields) {
-				iface = fields[i+1]
-				break
-			}
+	// First, try to find interface containing the target IP (most accurate)
+	out, _ := client.RunCombined(fmt.Sprintf("ip -4 addr show to %s 2>&1", targetIP))
+	if out != "" {
+		re := regexp.MustCompile(`\d+:\s+(\S+):?`)
+		matches := re.FindStringSubmatch(out)
+		if len(matches) > 1 {
+			iface = matches[1]
 		}
 	}
 
-	// If still empty, try to find interface containing the target IP
+	// If not found, try to get the interface with a private IP (likely LAN)
 	if iface == "" {
-		out, _ = client.RunCombined(fmt.Sprintf("ip -4 addr show to %s 2>&1", targetIP))
+		// Look for interfaces with private IP addresses (10.x, 172.16-31.x, 192.168.x)
+		out, _ = client.RunCombined("ip -4 addr show 2>&1 | grep -E 'inet (10\\.|172\\.(1[6-9]|2[0-9]|3[01])\\.|192\\.168\\.)' -B 2")
 		if out != "" {
+			// Find the interface name from the output
 			re := regexp.MustCompile(`\d+:\s+(\S+):?`)
 			matches := re.FindStringSubmatch(out)
 			if len(matches) > 1 {
@@ -369,27 +365,40 @@ func (m *Manager) DetectNetwork(client *SSHClient, targetIP string) (iface, cidr
 		}
 	}
 
-	// If still empty, try to list all interfaces and find one with an IP
+	// If still not found, try common LAN interface names
 	if iface == "" {
-		out, _ = client.RunCombined("ip -4 addr show 2>&1 | grep -E '^[0-9]+:' | head -n 2")
-		if out != "" {
-			// Skip loopback (lo), get the first real interface
-			lines := strings.Split(out, "\n")
-			for _, line := range lines {
-				if !strings.Contains(line, "lo:") {
-					re := regexp.MustCompile(`\d+:\s+(\S+):?`)
-					matches := re.FindStringSubmatch(line)
-					if len(matches) > 1 {
-						iface = matches[1]
-						break
+		commonLANIfaces := []string{"br-lan", "eth0", "ens18", "ens33", "enp0s3", "lan"}
+		for _, testIface := range commonLANIfaces {
+			out, err := client.RunCombined(fmt.Sprintf("ip -4 addr show dev %s 2>&1", testIface))
+			if err == nil && out != "" && strings.Contains(out, "inet ") {
+				iface = testIface
+				break
+			}
+		}
+	}
+
+	// Last resort: get default route interface (but skip if it's a WAN interface)
+	if iface == "" {
+		out, err := client.RunCombined("ip route get 8.8.8.8 2>&1")
+		if err == nil && out != "" {
+			fields := strings.Fields(out)
+			for i, f := range fields {
+				if f == "dev" && i+1 < len(fields) {
+					testIface := fields[i+1]
+					// Skip common WAN interface names
+					if !strings.Contains(testIface, "pppoe") && 
+					   !strings.Contains(testIface, "wan") && 
+					   testIface != "eth1" {
+						iface = testIface
 					}
+					break
 				}
 			}
 		}
 	}
 
 	if iface == "" {
-		return "", "", fmt.Errorf("无法找到网络接口，请手动输入")
+		return "", "", fmt.Errorf("无法找到 LAN 网络接口，请手动输入")
 	}
 
 	// Get CIDR for this interface
