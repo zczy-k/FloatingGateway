@@ -130,7 +130,7 @@ func (r *Renderer) buildTemplateData() *TemplateData {
 	}
 
 	// Find agent binary path
-	agentBinary := findAgentBinary()
+	agentBinary := FindAgentBinary()
 
 	return &TemplateData{
 		Role:            string(r.cfg.Role),
@@ -151,7 +151,7 @@ func (r *Renderer) buildTemplateData() *TemplateData {
 	}
 }
 
-func findAgentBinary() string {
+func FindAgentBinary() string {
 	// Standard installation paths for gateway-agent
 	paths := []string{
 		"/usr/bin/gateway-agent",

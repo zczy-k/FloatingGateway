@@ -332,7 +332,14 @@ func (d *Doctor) checkKeepalviedConfig() CheckResult {
 		// Analyze common errors
 		var suggestion string
 		if strings.Contains(errMsg, "track script") && strings.Contains(errMsg, "not found") {
-			suggestion = "健康检查脚本路径错误。请确认 gateway-agent 已安装到 /usr/bin/gateway-agent"
+			// Test if gateway-agent check command works
+			agentBinary := keepalived.FindAgentBinary()
+			testResult := exec.RunWithTimeout(agentBinary, 5*time.Second, "check", "--mode="+string(d.cfg.Health.Mode))
+			if !testResult.Success() {
+				suggestion = fmt.Sprintf("健康检查脚本无法执行。gateway-agent 路径: %s。错误: %s", agentBinary, testResult.Combined())
+			} else {
+				suggestion = fmt.Sprintf("健康检查脚本路径可能错误。当前配置使用: %s。请运行 'gateway-agent apply' 重新生成配置", agentBinary)
+			}
 		} else if strings.Contains(errMsg, "interface") && strings.Contains(errMsg, "doesn't exist") {
 			suggestion = "网卡接口不存在。请检查配置文件中的 interface 设置"
 		} else if strings.Contains(errMsg, "unicast_src_ip") {

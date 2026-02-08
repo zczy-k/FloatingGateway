@@ -2200,7 +2200,6 @@ document.addEventListener('DOMContentLoaded', () => {
                                     method: 'PUT',
                                     body: JSON.stringify({
                                         lan: {
-                                            iface: result.iface,
                                             cidr: result.cidr,
                                             vip: cfg.lan.vip || result.suggested_vip || ''
                                         }
