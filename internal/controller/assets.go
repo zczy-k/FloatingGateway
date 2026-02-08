@@ -174,6 +174,11 @@ const indexHTML = `<!DOCTYPE html>
                                 <option value="secondary" selected>旁路由 (Secondary - 首选网关)</option>
                             </select>
                         </div>
+                        <div class="form-group">
+                            <label>网卡接口</label>
+                            <input type="text" name="iface" required placeholder="如 br-lan、eth0、ens18">
+                            <small class="form-hint">点击上方"探测"按钮可自动获取</small>
+                        </div>
                     </div>
                     <div class="modal-footer">
                         <button type="button" class="btn btn-ghost" onclick="closeModal('modal-add-router')">取消</button>
@@ -202,11 +207,7 @@ const indexHTML = `<!DOCTYPE html>
                                 <input type="text" name="cidr" required placeholder="192.168.1.0/24">
                                 <button type="button" class="btn btn-sm btn-ghost" id="btn-detect-net">自动获取</button>
                             </div>
-                            <small class="form-hint">留空则根据网卡自动推断</small>
-                        </div>
-                        <div class="form-group">
-                            <label>网卡接口 (Interface)</label>
-                            <input type="text" name="iface" required placeholder="br-lan 或 eth0">
+                            <small class="form-hint">点击"自动获取"检测本机网段</small>
                         </div>
                         <div class="form-row">
                             <div class="form-group">
@@ -1815,6 +1816,7 @@ function renderRouters() {
             '<div class="router-info">' +
                 '<div><span class="label">主机:</span> <span class="value">' + router.host + ':' + router.port + '</span></div>' +
                 '<div><span class="label">系统:</span> <span class="value">' + (router.platform || '-') + '</span></div>' +
+                '<div><span class="label">网卡:</span> <span class="value">' + (router.iface || '使用全局') + '</span></div>' +
                 '<div><span class="label">Agent:</span> <span class="value">' + (router.agent_version || '未安装') + '</span></div>' +
                 '<div><span class="label">VRRP状态:</span> ' + (vrrpHtml || '<span class="value">-</span>') + '</div>' +
                 '<div><span class="label">健康状态:</span> ' + (healthHtml || '<span class="value">-</span>') + '</div>' +
@@ -2167,6 +2169,9 @@ document.addEventListener('DOMContentLoaded', () => {
             });
             log('探测成功: ' + result.iface + ' (' + result.cidr + ')', 'success');
             
+            // Auto-fill interface to form
+            form.iface.value = result.iface;
+            
             // Store result for later use
             window._lastProbeResult = result;
             
@@ -2258,7 +2263,8 @@ document.addEventListener('DOMContentLoaded', () => {
             user: form.user.value,
             password: form.password.value,
             key_file: form.key_file.value,
-            role: form.role.value
+            role: form.role.value,
+            iface: form.iface.value || ''
         };
         
         try {
@@ -2286,8 +2292,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const update = {
             lan: {
                 vip: form.vip.value,
-                cidr: form.cidr.value,
-                iface: form.iface.value
+                cidr: form.cidr.value
             },
             keepalived: {
                 vrid: parseInt(form.vrid.value)

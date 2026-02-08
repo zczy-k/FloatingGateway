@@ -50,6 +50,7 @@ type Router struct {
 	KeyFile      string       `yaml:"key_file,omitempty" json:"key_file,omitempty"`
 	Passphrase   string       `yaml:"passphrase,omitempty" json:"passphrase,omitempty"`
 	Role         config.Role  `yaml:"role" json:"role"`
+	Iface        string       `yaml:"iface,omitempty" json:"iface,omitempty"` // Per-router interface override
 	Status       RouterStatus `yaml:"-" json:"status"`
 	Platform     Platform     `yaml:"-" json:"platform"`
 	LastSeen     time.Time    `yaml:"-" json:"last_seen,omitempty"`
@@ -1109,7 +1110,13 @@ func (m *Manager) GenerateAgentConfig(r *Router) (*config.Config, error) {
 	cfg.Role = r.Role
 	cfg.LAN.VIP = m.config.LAN.VIP
 	cfg.LAN.CIDR = m.config.LAN.CIDR
-	cfg.LAN.Iface = m.config.LAN.Iface
+	
+	// Router must have its own interface configured
+	if r.Iface == "" {
+		return nil, fmt.Errorf("路由器 %s 未配置网卡接口，请在路由器设置中指定", r.Name)
+	}
+	cfg.LAN.Iface = r.Iface
+	
 	cfg.Keepalived.VRID = m.config.Keepalived.VRID
 	if m.config.Health.Mode != "" {
 		cfg.Health.Mode = m.config.Health.Mode
