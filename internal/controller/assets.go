@@ -1991,7 +1991,6 @@ document.addEventListener('DOMContentLoaded', () => {
             const form = $('#form-global-config');
             form.vip.value = cfg.lan.vip || '';
             form.cidr.value = cfg.lan.cidr || '';
-            form.iface.value = cfg.lan.iface || '';
             form.vrid.value = cfg.keepalived.vrid || 51;
             form.health_mode.value = cfg.health.mode || 'internet';
             openModal('modal-global-config');
@@ -2103,17 +2102,16 @@ document.addEventListener('DOMContentLoaded', () => {
             const result = await apiCall('/detect-net', { method: 'POST' });
             const form = $('#form-global-config');
             form.cidr.value = result.cidr;
-            form.iface.value = result.iface;
             // Auto-fill suggested VIP if not already set
             if (!form.vip.value && result.suggested_vip) {
                 form.vip.value = result.suggested_vip;
-                log('自动探测成功: ' + result.iface + ' (' + result.cidr + ')，建议 VIP: ' + result.suggested_vip, 'success');
+                log('自动探测成功: 网段 ' + result.cidr + '，建议 VIP: ' + result.suggested_vip, 'success');
             } else {
-                log('自动探测成功: ' + result.iface + ' (' + result.cidr + ')', 'success');
+                log('自动探测成功: 网段 ' + result.cidr, 'success');
             }
         } catch (e) {
             log('自动探测失败: ' + e.message, 'error');
-              showToast('探测失败: ' + e.message + '。请确保已添加路由器且网络正常。', 'error', 5000);
+              showToast('探测失败: ' + e.message + '。请确保网络正常。', 'error', 5000);
         } finally {
             btn.disabled = false;
             btn.textContent = originalText;

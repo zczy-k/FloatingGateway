@@ -461,22 +461,26 @@ func detectLocalNetwork() (iface, cidr string, err error) {
 		}
 
 		for _, addr := range addrs {
-			var ip net.IP
+			var ipNet *net.IPNet
 			switch v := addr.(type) {
 			case *net.IPNet:
-				ip = v.IP
+				ipNet = v
 			case *net.IPAddr:
-				ip = v.IP
+				// Convert IPAddr to IPNet with default mask
+				ipNet = &net.IPNet{
+					IP:   v.IP,
+					Mask: v.IP.DefaultMask(),
+				}
 			}
 
 			// Skip if not IPv4 or is loopback
-			if ip == nil || ip.IsLoopback() || ip.To4() == nil {
+			if ipNet == nil || ipNet.IP.IsLoopback() || ipNet.IP.To4() == nil {
 				continue
 			}
 
-			// Found a valid interface
+			// Found a valid interface - return network address, not host address
 			iface = i.Name
-			cidr = addr.String()
+			cidr = ipNet.String() // This gives us the network address like 192.168.1.0/24
 			return iface, cidr, nil
 		}
 	}
