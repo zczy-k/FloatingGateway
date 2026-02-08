@@ -8,6 +8,10 @@ go.sum
 # Misc
 -p
 
+# Build logs
+build_err.txt
+*.log
+
 # IDE
 .idea/
 .vscode/
