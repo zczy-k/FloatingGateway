@@ -38,6 +38,43 @@ const indexHTML = `<!DOCTYPE html>
             </div>
         </header>
 
+        <!-- Setup Progress Wizard -->
+        <div id="setup-wizard" class="setup-wizard" style="display:none;">
+            <div class="wizard-progress">
+                <div class="wizard-step" data-step="1">
+                    <div class="step-circle">1</div>
+                    <div class="step-label">添加主路由</div>
+                </div>
+                <div class="wizard-connector"></div>
+                <div class="wizard-step" data-step="2">
+                    <div class="step-circle">2</div>
+                    <div class="step-label">添加旁路由</div>
+                </div>
+                <div class="wizard-connector"></div>
+                <div class="wizard-step" data-step="3">
+                    <div class="step-circle">3</div>
+                    <div class="step-label">配置 VIP</div>
+                </div>
+                <div class="wizard-connector"></div>
+                <div class="wizard-step" data-step="4">
+                    <div class="step-circle">4</div>
+                    <div class="step-label">安装 Agent</div>
+                </div>
+            </div>
+            <div class="wizard-hint" id="wizard-hint"></div>
+        </div>
+
+        <!-- Context-aware Action Card -->
+        <div id="action-card" class="action-card" style="display:none;">
+            <div class="action-card-icon" id="action-card-icon"></div>
+            <div class="action-card-content">
+                <div class="action-card-title" id="action-card-title"></div>
+                <div class="action-card-desc" id="action-card-desc"></div>
+            </div>
+            <div class="action-card-actions" id="action-card-actions"></div>
+            <button class="action-card-close" onclick="hideActionCard()">&times;</button>
+        </div>
+
         <main>
             <section id="routers-section">
                 <div class="section-header">
@@ -188,6 +225,7 @@ const indexHTML = `<!DOCTYPE html>
             </div>
         </div>
     </div>
+    <div class="toast-container" id="toast-container"></div>
     <script src="/app.js"></script>
 </body>
 </html>`
@@ -967,11 +1005,227 @@ select {
         width: 95%;
         max-height: 90vh;
     }
+}
+
+/* Setup Wizard */
+.setup-wizard {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    padding: 1.25rem 1.5rem;
+    margin: 0 auto 1rem;
+    max-width: 1200px;
+}
+
+.wizard-progress {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0;
+    margin-bottom: 0.75rem;
+}
+
+.wizard-step {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.4rem;
+    min-width: 90px;
+}
+
+.step-circle {
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    background: var(--bg-input);
+    border: 2px solid var(--border);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: var(--text-muted);
+    transition: all var(--transition);
+}
+
+.wizard-step.active .step-circle {
+    background: var(--primary);
+    border-color: var(--primary);
+    color: #fff;
+    box-shadow: 0 0 12px rgba(88, 166, 255, 0.4);
+}
+
+.wizard-step.completed .step-circle {
+    background: var(--success);
+    border-color: var(--success);
+    color: #fff;
+}
+
+.wizard-step.completed .step-circle::after {
+    content: '\u2713';
+}
+
+.step-label {
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    text-align: center;
+    transition: color var(--transition);
+}
+
+.wizard-step.active .step-label {
+    color: var(--primary);
+    font-weight: 500;
+}
+
+.wizard-step.completed .step-label {
+    color: var(--success);
+}
+
+.wizard-connector {
+    flex: 1;
+    max-width: 80px;
+    height: 2px;
+    background: var(--border);
+    margin: 0 0.5rem;
+    margin-bottom: 1.5rem;
+}
+
+.wizard-hint {
+    text-align: center;
+    font-size: 0.85rem;
+    color: var(--text-secondary);
+    padding-top: 0.5rem;
+    border-top: 1px solid var(--border-light);
+}
+
+/* Action Card */
+.action-card {
+    background: linear-gradient(135deg, var(--bg-card) 0%, var(--bg-surface) 100%);
+    border: 1px solid var(--primary);
+    border-radius: var(--radius-lg);
+    padding: 1.25rem 1.5rem;
+    margin: 0 auto 1.5rem;
+    max-width: 1200px;
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    position: relative;
+    box-shadow: 0 0 20px rgba(88, 166, 255, 0.08);
+}
+
+.action-card-icon {
+    flex-shrink: 0;
+    width: 48px;
+    height: 48px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--bg-input);
+    border-radius: 12px;
+}
+
+.action-card-content {
+    flex: 1;
+}
+
+.action-card-title {
+    font-size: 1rem;
+    font-weight: 600;
+    color: var(--text);
+    margin-bottom: 0.25rem;
+}
+
+.action-card-desc {
+    font-size: 0.85rem;
+    color: var(--text-secondary);
+}
+
+.action-card-actions {
+    display: flex;
+    gap: 0.5rem;
+    flex-shrink: 0;
+}
+
+.action-card-close {
+    position: absolute;
+    top: 0.5rem;
+    right: 0.5rem;
+    background: none;
+    border: none;
+    color: var(--text-muted);
+    font-size: 1.2rem;
+    cursor: pointer;
+    padding: 0.2rem 0.4rem;
+    border-radius: 4px;
+    line-height: 1;
+    transition: all var(--transition);
+}
+
+.action-card-close:hover {
+    background: var(--bg-card-hover);
+    color: var(--text);
+}
+
+/* Toast notifications */
+.toast-container {
+    position: fixed;
+    bottom: 1.5rem;
+    right: 1.5rem;
+    z-index: 2000;
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+
+.toast {
+    background: var(--bg-surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 0.75rem 1rem;
+    font-size: 0.85rem;
+    box-shadow: var(--shadow-lg);
+    animation: toastIn 0.3s ease;
+    max-width: 320px;
+}
+
+.toast.success { border-color: var(--success); }
+.toast.error { border-color: var(--danger); }
+.toast.warning { border-color: var(--warning); }
+
+@keyframes toastIn {
+    from { opacity: 0; transform: translateX(20px); }
+    to { opacity: 1; transform: translateX(0); }
+}
+
+/* Responsive for wizard */
+@media (max-width: 640px) {
+    .wizard-progress {
+        flex-wrap: wrap;
+    }
+    
+    .wizard-connector {
+        display: none;
+    }
+    
+    .wizard-step {
+        min-width: 70px;
+    }
+    
+    .action-card {
+        flex-direction: column;
+        text-align: center;
+    }
+    
+    .action-card-actions {
+        width: 100%;
+        justify-content: center;
+    }
 }`
 
 const appJS = `// Gateway Controller UI
 const API_BASE = '/api';
 let routers = [];
+let globalConfig = null;
 
 // Utility functions
 function $(sel) { return document.querySelector(sel); }
@@ -991,6 +1245,166 @@ function log(msg, type = 'info') {
     // Keep only last 50 entries
     while (logs.children.length > 50) {
         logs.removeChild(logs.lastChild);
+    }
+}
+
+// Toast notifications
+function showToast(msg, type = 'info', duration = 3500) {
+    const container = $('#toast-container');
+    const toast = document.createElement('div');
+    toast.className = 'toast ' + type;
+    toast.textContent = msg;
+    container.appendChild(toast);
+    setTimeout(() => {
+        toast.style.opacity = '0';
+        toast.style.transform = 'translateX(20px)';
+        toast.style.transition = 'all 0.3s ease';
+        setTimeout(() => toast.remove(), 300);
+    }, duration);
+}
+
+// ============ Setup Wizard Logic ============
+function getSetupStep() {
+    const hasPrimary = routers.some(r => r.role === 'primary');
+    const hasSecondary = routers.some(r => r.role === 'secondary');
+    const hasVIP = globalConfig && globalConfig.lan && globalConfig.lan.vip;
+    const allInstalled = routers.length >= 2 && routers.every(r => r.agent_version);
+    
+    if (!hasPrimary) return 1;
+    if (!hasSecondary) return 2;
+    if (!hasVIP) return 3;
+    if (!allInstalled) return 4;
+    return 0; // Setup complete
+}
+
+function updateWizard() {
+    const wizard = $('#setup-wizard');
+    const step = getSetupStep();
+    
+    if (step === 0) {
+        wizard.style.display = 'none';
+        hideActionCard();
+        return;
+    }
+    
+    wizard.style.display = 'block';
+    
+    // Update step circles
+    $$('.wizard-step').forEach((el, idx) => {
+        const stepNum = idx + 1;
+        el.classList.remove('active', 'completed');
+        if (stepNum < step) {
+            el.classList.add('completed');
+        } else if (stepNum === step) {
+            el.classList.add('active');
+        }
+    });
+    
+    // Update hint text
+    const hints = {
+        1: '请点击「添加路由器」添加一台主路由器（Primary），这将作为故障时的备用网关',
+        2: '请添加一台旁路由器（Secondary），这将作为默认首选网关',
+        3: '请点击「全局设置」配置虚拟 IP (VIP) 地址',
+        4: '配置已完成，点击下方按钮一键安装所有 Agent'
+    };
+    $('#wizard-hint').textContent = hints[step] || '';
+    
+    // Show action card with context-aware suggestion
+    showActionCardForStep(step);
+}
+
+function showActionCardForStep(step) {
+    const card = $('#action-card');
+    const iconEl = $('#action-card-icon');
+    const titleEl = $('#action-card-title');
+    const descEl = $('#action-card-desc');
+    const actionsEl = $('#action-card-actions');
+    
+    card.style.display = 'flex';
+    
+    const icons = {
+        1: '<svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="var(--primary)" stroke-width="2"><rect x="2" y="2" width="20" height="8" rx="2"/><rect x="2" y="14" width="20" height="8" rx="2"/><line x1="6" y1="6" x2="6.01" y2="6"/><line x1="6" y1="18" x2="6.01" y2="18"/></svg>',
+        2: '<svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="var(--warning)" stroke-width="2"><rect x="2" y="2" width="20" height="8" rx="2"/><rect x="2" y="14" width="20" height="8" rx="2"/><line x1="6" y1="6" x2="6.01" y2="6"/><line x1="6" y1="18" x2="6.01" y2="18"/></svg>',
+        3: '<svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="var(--success)" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 8v4l2 2"/></svg>',
+        4: '<svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="var(--success)" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22,4 12,14.01 9,11.01"/></svg>'
+    };
+    
+    const configs = {
+        1: {
+            title: '第 1 步：添加主路由器',
+            desc: '主路由器（Primary）将作为故障时的备用网关，优先级较低',
+            actions: '<button class="btn btn-primary" onclick="openAddRouterWithRole(\'primary\')">添加主路由器</button>'
+        },
+        2: {
+            title: '第 2 步：添加旁路由器',
+            desc: '旁路由器（Secondary）将作为默认首选网关，优先级较高',
+            actions: '<button class="btn btn-primary" onclick="openAddRouterWithRole(\'secondary\')">添加旁路由器</button>'
+        },
+        3: {
+            title: '第 3 步：配置虚拟 IP',
+            desc: '设置 VIP 地址，这是客户端实际使用的网关地址',
+            actions: '<button class="btn btn-primary" onclick="openGlobalConfigWithSuggestion()">配置 VIP</button>'
+        },
+        4: {
+            title: '准备就绪',
+            desc: '所有配置已完成，点击按钮一键在所有路由器上安装 Agent',
+            actions: '<button class="btn btn-primary" onclick="installAll()">一键安装所有 Agent</button>'
+        }
+    };
+    
+    const cfg = configs[step];
+    iconEl.innerHTML = icons[step];
+    titleEl.textContent = cfg.title;
+    descEl.textContent = cfg.desc;
+    actionsEl.innerHTML = cfg.actions;
+}
+
+function hideActionCard() {
+    $('#action-card').style.display = 'none';
+}
+
+function openAddRouterWithRole(role) {
+    const form = $('#form-add-router');
+    form.reset();
+    form.role.value = role;
+    openModal('modal-add-router');
+}
+
+async function openGlobalConfigWithSuggestion() {
+    try {
+        const cfg = await apiCall('/config');
+        const form = $('#form-global-config');
+        form.vip.value = cfg.lan.vip || '';
+        form.cidr.value = cfg.lan.cidr || '';
+        form.iface.value = cfg.lan.iface || '';
+        form.vrid.value = cfg.keepalived.vrid || 51;
+        form.health_mode.value = cfg.health.mode || 'internet';
+        
+        // Auto detect if missing
+        if (!cfg.lan.cidr || !cfg.lan.iface) {
+            openModal('modal-global-config');
+            // Trigger auto-detect
+            setTimeout(() => $('#btn-detect-net').click(), 300);
+        } else {
+            openModal('modal-global-config');
+        }
+    } catch (e) {
+        log('获取配置失败: ' + e.message, 'error');
+    }
+}
+
+async function installAll() {
+    if (!confirm('确定要在所有路由器上安装 gateway-agent 吗？')) return;
+    
+    log('正在所有路由器上安装 Agent...');
+    try {
+        await apiCall('/routers/install-all', { method: 'POST' });
+        log('已开始批量安装', 'success');
+        if (refreshTimer) clearTimeout(refreshTimer);
+        refreshStatus();
+    } catch (e) {
+        log('批量安装失败: ' + e.message, 'error');
+        showToast('安装失败: ' + e.message, 'error');
     }
 }
 
@@ -1020,13 +1434,19 @@ async function apiCall(endpoint, options = {}) {
 let refreshTimer = null;
 async function refreshStatus() {
     try {
-        const status = await apiCall('/status');
+        const [status, cfg] = await Promise.all([
+            apiCall('/status'),
+            apiCall('/config')
+        ]);
+        
+        globalConfig = cfg;
         
         $('#vip-address').textContent = status.vip || '-';
         $('#current-master').textContent = status.current_master || '无';
         
         routers = status.routers || [];
         renderRouters();
+        updateWizard();
 
         // If any router is installing/uninstalling, poll faster (every 2s)
         const isBusy = routers.some(r => r.status === 'installing' || r.status === 'uninstalling');
@@ -1286,10 +1706,16 @@ document.addEventListener('DOMContentLoaded', () => {
             const form = $('#form-global-config');
             form.cidr.value = result.cidr;
             form.iface.value = result.iface;
-            log('自动探测成功: ' + result.iface + ' (' + result.cidr + ')', 'success');
+            // Auto-fill suggested VIP if not already set
+            if (!form.vip.value && result.suggested_vip) {
+                form.vip.value = result.suggested_vip;
+                log('自动探测成功: ' + result.iface + ' (' + result.cidr + ')，建议 VIP: ' + result.suggested_vip, 'success');
+            } else {
+                log('自动探测成功: ' + result.iface + ' (' + result.cidr + ')', 'success');
+            }
         } catch (e) {
             log('自动探测失败: ' + e.message, 'error');
-            alert('探测失败: ' + e.message + '\n\n请确保已添加至少一个路由器且网络连接正常。');
+              showToast('探测失败: ' + e.message + '。请确保已添加路由器且网络正常。', 'error', 5000);
         } finally {
             btn.disabled = false;
             btn.textContent = originalText;
@@ -1306,9 +1732,9 @@ document.addEventListener('DOMContentLoaded', () => {
         const port = parseInt(form.port.value) || 22;
         
         if (!host) {
-            alert('请先输入主机地址');
-            return;
-        }
+              showToast('请先输入主机地址', 'warning');
+              return;
+          }
         if (!password && !key_file) {
             if (!confirm('你没有填写 SSH 密码或私钥路径，探测可能会因为权限不足而失败。是否继续？')) {
                 return;
@@ -1332,26 +1758,27 @@ document.addEventListener('DOMContentLoaded', () => {
             
             // Suggest filling global config if empty
             const currentCfg = await apiCall('/config');
-            if (!currentCfg.lan.iface || !currentCfg.lan.cidr) {
-                if (confirm('探测到网段: ' + result.cidr + '\n网卡: ' + result.iface + '\n\n是否将其设为全局默认配置？')) {
-                    await apiCall('/config', {
-                        method: 'PUT',
-                        body: JSON.stringify({
-                            lan: {
-                                iface: result.iface,
-                                cidr: result.cidr,
-                                vip: currentCfg.lan.vip || result.cidr.split('.').slice(0, 3).join('.') + '.254'
-                            }
-                        })
-                    });
+              if (!currentCfg.lan.iface || !currentCfg.lan.cidr) {
+                  if (confirm('探测到网段: ' + result.cidr + '\n网卡: ' + result.iface + (result.suggested_vip ? '\n建议 VIP: ' + result.suggested_vip : '') + '\n\n是否将其设为全局默认配置？')) {
+                      await apiCall('/config', {
+                          method: 'PUT',
+                          body: JSON.stringify({
+                              lan: {
+                                  iface: result.iface,
+                                  cidr: result.cidr,
+                                  vip: currentCfg.lan.vip || result.suggested_vip || ''
+                              }
+                          })
+                      });
                     log('已自动更新全局网络配置', 'success');
+                    showToast('全局网络配置已更新', 'success');
                 }
             } else {
-                alert('探测成功！\n网卡: ' + result.iface + '\n网段: ' + result.cidr);
+                showToast('探测成功! 网卡: ' + result.iface + ' 网段: ' + result.cidr, 'success');
             }
         } catch (e) {
             log('探测失败: ' + e.message, 'error');
-            alert('探测失败: ' + e.message);
+            showToast('探测失败: ' + e.message, 'error');
         } finally {
             btn.disabled = false;
             btn.textContent = originalText;
@@ -1379,17 +1806,21 @@ document.addEventListener('DOMContentLoaded', () => {
         };
         
         try {
-            await apiCall('/routers', {
-                method: 'POST',
-                body: JSON.stringify(router)
-            });
-            log('已添加路由器: ' + router.name, 'success');
-            closeModal('modal-add-router');
-            form.reset();
-            await refreshStatus();
-        } catch (e) {
-            log('添加路由器失败: ' + e.message, 'error');
-        }
+              await apiCall('/routers', {
+                  method: 'POST',
+                  body: JSON.stringify(router)
+              });
+              log('已添加路由器: ' + router.name, 'success');
+              showToast('已添加路由器: ' + router.name, 'success');
+              closeModal('modal-add-router');
+              form.reset();
+              await refreshStatus();
+              // Auto-probe the newly added router
+              probeRouter(router.name);
+          } catch (e) {
+              log('添加路由器失败: ' + e.message, 'error');
+              showToast('添加失败: ' + e.message, 'error');
+          }
     });
 
     // Global config form
@@ -1411,16 +1842,18 @@ document.addEventListener('DOMContentLoaded', () => {
         };
         
         try {
-            await apiCall('/config', {
-                method: 'PUT',
-                body: JSON.stringify(update)
-            });
-            log('全局配置已更新', 'success');
-            closeModal('modal-global-config');
-            await refreshStatus();
-        } catch (e) {
-            log('更新配置失败: ' + e.message, 'error');
-        }
+              await apiCall('/config', {
+                  method: 'PUT',
+                  body: JSON.stringify(update)
+              });
+              log('全局配置已更新', 'success');
+              showToast('全局配置已保存', 'success');
+              closeModal('modal-global-config');
+              await refreshStatus();
+          } catch (e) {
+              log('更新配置失败: ' + e.message, 'error');
+              showToast('保存失败: ' + e.message, 'error');
+          }
     });
     
     // Close modal on background click
@@ -1430,5 +1863,12 @@ document.addEventListener('DOMContentLoaded', () => {
                 modal.classList.remove('active');
             }
         });
+    });
+
+    // Close modal on ESC key
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') {
+            $$('.modal.active').forEach(m => m.classList.remove('active'));
+        }
     });
 });`

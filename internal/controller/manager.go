@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"os"
 	"os/exec"
@@ -264,14 +265,14 @@ func (m *Manager) Probe(r *Router) error {
 		}
 	}
 
-	// Check agent version
-	if ver, err := client.RunCombined("gateway-agent version 2>/dev/null"); err == nil {
+	// Check agent version (try absolute path first, then PATH)
+	if ver, err := client.RunCombined("/usr/bin/gateway-agent version 2>/dev/null || gateway-agent version 2>/dev/null"); err == nil {
 		r.AgentVer = strings.TrimSpace(ver)
 	}
 
 	// Get agent status if installed
 	if r.AgentVer != "" {
-		if output, err := client.RunCombined("gateway-agent status --json 2>/dev/null"); err == nil {
+		if output, err := client.RunCombined("/usr/bin/gateway-agent status --json 2>/dev/null || gateway-agent status --json 2>/dev/null"); err == nil {
 			var status struct {
 				Keepalived struct {
 					VRRPState string `json:"vrrp_state"`
@@ -344,13 +345,8 @@ func (m *Manager) DetectNetwork(client *SSHClient, targetIP string) (iface, cidr
 			matches := re.FindStringSubmatch(out)
 			if len(matches) > 1 {
 				cidrFull := matches[1]
-				parts := strings.Split(cidrFull, "/")
-				if len(parts) == 2 {
-					ipDots := strings.Split(parts[0], ".")
-					if len(ipDots) == 4 {
-						cidr = fmt.Sprintf("%s.%s.%s.0/%s", ipDots[0], ipDots[1], ipDots[2], parts[1])
-					}
-				}
+				// Use proper CIDR calculation
+				cidr = cidrToNetwork(cidrFull)
 			}
 		}
 	}
@@ -394,7 +390,7 @@ func (r *Router) StepLog(msg string) {
 func (m *Manager) Install(r *Router, agentConfig *config.Config) error {
 	r.InstallLog = nil
 	r.InstallStep = 0
-	r.InstallTotal = 11
+	r.InstallTotal = 12
 	r.Error = ""
 	r.Status = StatusInstalling
 
@@ -463,15 +459,35 @@ func (m *Manager) Install(r *Router, agentConfig *config.Config) error {
 		r.AddLog("!! 读取二进制文件失败: " + err.Error())
 		return fmt.Errorf("read binary: %w", err)
 	}
+
+	// Ensure target directories exist
 	if err := client.MkdirAll("/etc/gateway-agent"); err != nil {
-		r.AddLog("!! 创建目录失败: " + err.Error())
+		r.AddLog("!! 创建配置目录失败: " + err.Error())
 		return fmt.Errorf("create config dir: %w", err)
 	}
+	if err := client.MkdirAll("/usr/bin"); err != nil {
+		r.AddLog("!! 创建 /usr/bin 目录失败: " + err.Error())
+		return fmt.Errorf("create bin dir: %w", err)
+	}
+
 	if err := client.WriteFile("/usr/bin/gateway-agent", binData, 0755); err != nil {
 		r.AddLog("!! 上传失败: " + err.Error())
 		return fmt.Errorf("upload binary: %w", err)
 	}
-	r.AddLog("   上传成功")
+
+	// Verify upload size immediately
+	expectedSize := len(binData)
+	if sizeOut, err := client.RunCombined("stat -c %s /usr/bin/gateway-agent 2>/dev/null || stat -f %z /usr/bin/gateway-agent 2>/dev/null"); err != nil {
+		r.AddLog("!! 无法验证上传: " + err.Error())
+		return fmt.Errorf("verify upload size: %w", err)
+	} else {
+		actualSize := strings.TrimSpace(sizeOut)
+		r.AddLog(fmt.Sprintf("   上传成功 (预期: %d 字节, 实际: %s 字节)", expectedSize, actualSize))
+		if actualSize != fmt.Sprintf("%d", expectedSize) {
+			r.AddLog("!! 文件大小不匹配，上传可能不完整")
+			return fmt.Errorf("upload size mismatch: expected %d, got %s", expectedSize, actualSize)
+		}
+	}
 
 	// Generate and upload config
 	r.StepLog("生成并上传配置文件...")
@@ -495,12 +511,35 @@ func (m *Manager) Install(r *Router, agentConfig *config.Config) error {
 	}
 	r.AddLog("   Keepalived 就绪")
 
-	// Apply agent config
+	// Verify binary was uploaded correctly and is executable
+	r.StepLog("验证 Agent 二进制文件...")
+	verifyScript := `ls -la /usr/bin/gateway-agent 2>&1
+file /usr/bin/gateway-agent 2>/dev/null || echo 'file command not available'
+/usr/bin/gateway-agent version 2>&1 || echo 'version check failed'`
+	if output, err := client.RunCombined(verifyScript); err != nil {
+		r.AddLog("!! 验证失败: " + err.Error())
+		r.AddLog("   输出: " + output)
+		// Check if the file exists but isn't executable
+		if checkOut, _ := client.RunCombined("test -f /usr/bin/gateway-agent && echo 'file exists' || echo 'file missing'"); checkOut != "" {
+			r.AddLog("   文件检查: " + checkOut)
+		}
+		return fmt.Errorf("verify binary: %w", err)
+	} else {
+		r.AddLog("   " + strings.TrimSpace(output))
+	}
+
+	// Apply agent config (use absolute path and explicit config path)
 	r.StepLog("初始化 Agent 配置...")
-	if output, err := client.RunCombined("gateway-agent apply"); err != nil {
+	// Set PATH explicitly to ensure the command can find dependencies
+	applyCmd := "PATH=/usr/bin:/usr/local/bin:/bin:/sbin:$PATH /usr/bin/gateway-agent apply -c /etc/gateway-agent/config.yaml"
+	if output, err := client.RunCombined(applyCmd); err != nil {
 		r.AddLog("!! 初始化失败: " + err.Error())
 		if output != "" {
 			r.AddLog("   输出: " + output)
+		}
+		// Try to get more debug info
+		if debugOut, _ := client.RunCombined("echo PATH=$PATH && ls -la /usr/bin/gateway-agent && cat /etc/gateway-agent/config.yaml | head -20"); debugOut != "" {
+			r.AddLog("   调试信息: " + debugOut)
 		}
 		return fmt.Errorf("apply config: %w", err)
 	}
@@ -575,8 +614,8 @@ func (m *Manager) Doctor(r *Router) (string, error) {
 	}
 	defer client.Close()
 
-	// Run doctor and get JSON output
-	output, err := client.RunCombined("gateway-agent doctor --json")
+	// Run doctor with absolute path and get JSON output
+	output, err := client.RunCombined("/usr/bin/gateway-agent doctor --json")
 	if err != nil {
 		return "", fmt.Errorf("run doctor: %w (output: %s)", err, output)
 	}
@@ -1038,4 +1077,83 @@ func (m *Manager) ValidateConfig() error {
 	}
 
 	return nil
+}
+
+// cidrToNetwork converts an IP/prefix (like 192.168.1.100/24) to network address (192.168.1.0/24).
+func cidrToNetwork(cidrFull string) string {
+	_, ipNet, err := net.ParseCIDR(cidrFull)
+	if err != nil {
+		// Fallback to simple calculation for /24
+		parts := strings.Split(cidrFull, "/")
+		if len(parts) == 2 {
+			ipDots := strings.Split(parts[0], ".")
+			if len(ipDots) == 4 {
+				return fmt.Sprintf("%s.%s.%s.0/%s", ipDots[0], ipDots[1], ipDots[2], parts[1])
+			}
+		}
+		return ""
+	}
+	return ipNet.String()
+}
+
+// SuggestVIP generates a suggested VIP address based on the CIDR.
+// It tries .254, .253, .252 etc. until finding an available one.
+func (m *Manager) SuggestVIP(cidr string) string {
+	if cidr == "" {
+		return ""
+	}
+
+	_, ipNet, err := net.ParseCIDR(cidr)
+	if err != nil {
+		return ""
+	}
+
+	// Get network address as 4 bytes
+	ip := ipNet.IP.To4()
+	if ip == nil {
+		return ""
+	}
+
+	// Get mask to determine valid host range
+	mask := ipNet.Mask
+	ones, bits := mask.Size()
+	if bits != 32 {
+		return ""
+	}
+
+	// Calculate number of host bits
+	hostBits := bits - ones
+	if hostBits < 2 {
+		return "" // Too small network
+	}
+
+	// Try common gateway addresses: .254, .253, .252, .251, .1
+	// For a /24 network, these would be x.x.x.254, x.x.x.253, etc.
+	candidates := []int{254, 253, 252, 251, 1}
+
+	// Get existing router IPs to avoid conflicts
+	existingIPs := make(map[string]bool)
+	for _, r := range m.config.Routers {
+		existingIPs[r.Host] = true
+	}
+
+	for _, lastOctet := range candidates {
+		candidateIP := net.IPv4(ip[0], ip[1], ip[2], byte(lastOctet))
+
+		// Check if this IP is within the network
+		if !ipNet.Contains(candidateIP) {
+			continue
+		}
+
+		// Check if it's not already used by a router
+		candidateStr := candidateIP.String()
+		if existingIPs[candidateStr] {
+			continue
+		}
+
+		return candidateStr
+	}
+
+	// Default fallback
+	return fmt.Sprintf("%d.%d.%d.254", ip[0], ip[1], ip[2])
 }

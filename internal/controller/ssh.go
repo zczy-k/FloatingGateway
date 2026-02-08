@@ -3,8 +3,8 @@ package controller
 
 import (
 	"bytes"
+	"encoding/base64"
 	"fmt"
-	"io"
 	"net"
 	"os"
 	"path/filepath"
@@ -219,11 +219,14 @@ func (c *SSHClient) MkdirAll(dir string) error {
 	return err
 }
 
-// WriteFile writes data to a remote file using cat.
+// WriteFile writes data to a remote file using base64 encoding for binary safety.
 func (c *SSHClient) WriteFile(remotePath string, data []byte, mode os.FileMode) error {
 	if c.client == nil {
 		return fmt.Errorf("not connected")
 	}
+
+	// Use base64 encoding for binary safety
+	encoded := base64.StdEncoding.EncodeToString(data)
 
 	session, err := c.client.NewSession()
 	if err != nil {
@@ -239,11 +242,12 @@ func (c *SSHClient) WriteFile(remotePath string, data []byte, mode os.FileMode) 
 	errCh := make(chan error, 1)
 	go func() {
 		defer stdin.Close()
-		_, err := io.Copy(stdin, bytes.NewReader(data))
+		_, err := stdin.Write([]byte(encoded))
 		errCh <- err
 	}()
 
-	cmd := fmt.Sprintf("cat > '%s' && chmod %04o '%s'", remotePath, mode, remotePath)
+	// Use base64 -d to decode and write to file
+	cmd := fmt.Sprintf("base64 -d > '%s' && chmod %04o '%s'", remotePath, mode, remotePath)
 	if err := session.Run(cmd); err != nil {
 		return fmt.Errorf("run command: %w", err)
 	}

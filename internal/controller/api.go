@@ -40,6 +40,7 @@ func (s *Server) setupRoutes() {
 	s.mux.HandleFunc("/api/status", s.handleStatus)
 	s.mux.HandleFunc("/api/config", s.handleConfig)
 	s.mux.HandleFunc("/api/detect-net", s.handleDetectNet)
+	s.mux.HandleFunc("/api/routers/install-all", s.handleInstallAll)
 
 	// Static files (web UI)
 	s.mux.HandleFunc("/", s.handleStatic)
@@ -465,9 +466,86 @@ func (s *Server) handleDetectNet(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Generate suggested VIP based on CIDR
+	suggestedVIP := s.manager.SuggestVIP(cidr)
+
 	writeJSON(w, http.StatusOK, map[string]string{
-		"iface": iface,
-		"cidr":  cidr,
+		"iface":         iface,
+		"cidr":          cidr,
+		"suggested_vip": suggestedVIP,
+	})
+}
+
+// handleInstallAll handles POST /api/routers/install-all
+func (s *Server) handleInstallAll(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+
+	routers := s.manager.GetRouters()
+	if len(routers) < 2 {
+		writeError(w, http.StatusBadRequest, fmt.Errorf("至少需要配置两台路由器才能安装"))
+		return
+	}
+
+	// Check global config
+	cfg := s.manager.GetConfig()
+	if cfg.LAN.VIP == "" {
+		writeError(w, http.StatusBadRequest, fmt.Errorf("请先在全局设置中配置 VIP"))
+		return
+	}
+
+	// Check roles
+	hasPrimary := false
+	hasSecondary := false
+	for _, router := range routers {
+		if router.Role == config.RolePrimary {
+			hasPrimary = true
+		}
+		if router.Role == config.RoleSecondary {
+			hasSecondary = true
+		}
+	}
+	if !hasPrimary || !hasSecondary {
+		writeError(w, http.StatusBadRequest, fmt.Errorf("需要至少一台主路由(primary)和一台旁路由(secondary)"))
+		return
+	}
+
+	// Start installation for all routers that don't have agent installed
+	installed := 0
+	for _, router := range routers {
+		if router.AgentVer != "" {
+			continue // Already installed
+		}
+		if router.Status == StatusInstalling {
+			continue // Already installing
+		}
+
+		agentConfig, err := s.manager.GenerateAgentConfig(router)
+		if err != nil {
+			continue
+		}
+
+		router.Status = StatusInstalling
+		router.InstallLog = nil
+		router.InstallStep = 0
+		router.InstallTotal = 11
+		router.Error = ""
+
+		go func(r *Router, cfg *config.Config) {
+			if err := s.manager.Install(r, cfg); err != nil {
+				r.Status = StatusError
+				r.Error = err.Error()
+			}
+		}(router, agentConfig)
+		installed++
+	}
+
+	writeJSON(w, http.StatusAccepted, map[string]interface{}{
+		"status":    "installing",
+		"message":   fmt.Sprintf("已开始安装 %d 台路由器", installed),
+		"count":     installed,
 	})
 }
 

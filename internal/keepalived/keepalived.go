@@ -49,7 +49,7 @@ global_defs {
 }
 
 vrrp_script chk_gateway {
-    script "{{ .AgentBinary }} check --mode={{ .HealthMode }}"
+    script "PATH=/usr/bin:/usr/local/bin:/bin:/sbin:$PATH {{ .AgentBinary }} check --mode={{ .HealthMode }}"
     interval {{ .CheckInterval }}
     weight {{ .TrackWeight }}
     fall 2
@@ -82,9 +82,9 @@ vrrp_instance GATEWAY {
         chk_gateway
     }
 
-    notify_master "/usr/bin/env gateway-agent notify master"
-    notify_backup "/usr/bin/env gateway-agent notify backup"
-    notify_fault  "/usr/bin/env gateway-agent notify fault"
+    notify_master "/bin/sh -c 'PATH=/usr/bin:/usr/local/bin:/bin:/sbin:$PATH {{ .AgentBinary }} notify master'"
+    notify_backup "/bin/sh -c 'PATH=/usr/bin:/usr/local/bin:/bin:/sbin:$PATH {{ .AgentBinary }} notify backup'"
+    notify_fault  "/bin/sh -c 'PATH=/usr/bin:/usr/local/bin:/bin:/sbin:$PATH {{ .AgentBinary }} notify fault'"
 }
 `
 
@@ -152,20 +152,21 @@ func (r *Renderer) buildTemplateData() *TemplateData {
 }
 
 func findAgentBinary() string {
+	// Standard installation paths for gateway-agent
 	paths := []string{
-		"/usr/local/bin/gateway-agent",
 		"/usr/bin/gateway-agent",
-		"gateway-agent",
+		"/usr/local/bin/gateway-agent",
 	}
 	for _, p := range paths {
 		if _, err := os.Stat(p); err == nil {
 			return p
 		}
 	}
-	// Check in PATH
+	// Check in PATH as fallback
 	if path, err := exec.Which("gateway-agent"); err == nil {
 		return path
 	}
+	// Default to standard location
 	return "/usr/bin/gateway-agent"
 }
 
