@@ -3,7 +3,12 @@ package controller
 import (
 	"encoding/json"
 	"fmt"
+	"io"
+	"log"
 	"net/http"
+	"os"
+	"os/exec"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -42,6 +47,7 @@ func (s *Server) setupRoutes() {
 	s.mux.HandleFunc("/api/detect-net", s.handleDetectNet)
 	s.mux.HandleFunc("/api/routers/install-all", s.handleInstallAll)
 	s.mux.HandleFunc("/api/version", s.handleVersion)
+	s.mux.HandleFunc("/api/upgrade", s.handleUpgrade)
 
 	// Static files (web UI)
 	s.mux.HandleFunc("/", s.handleStatic)
@@ -724,4 +730,132 @@ func compareVersions(v1, v2 string) int {
 	}
 
 	return 0
+}
+
+
+// handleUpgrade handles POST /api/upgrade - auto-upgrade controller to latest version
+func (s *Server) handleUpgrade(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.PostMethod {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req struct {
+		Version string `json:"version"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+
+	// Start upgrade in background
+	go func() {
+		if err := performUpgrade(req.Version); err != nil {
+			log.Printf("Upgrade failed: %v", err)
+		}
+	}()
+
+	writeJSON(w, http.StatusOK, map[string]string{
+		"status":  "upgrading",
+		"message": "Upgrade started, service will restart in a few seconds",
+	})
+}
+
+// performUpgrade downloads and installs the new version
+func performUpgrade(targetVersion string) error {
+	log.Printf("Starting upgrade to version %s", targetVersion)
+
+	// Determine binary name based on OS and architecture
+	binaryName := fmt.Sprintf("gateway-controller-%s-%s", runtime.GOOS, runtime.GOARCH)
+	if runtime.GOOS == "windows" {
+		binaryName += ".exe"
+	}
+
+	// Download URL with acceleration proxy support
+	downloadURLs := []string{
+		fmt.Sprintf("https://ghproxy.com/https://github.com/zczy-k/FloatingGateway/releases/download/%s/%s", targetVersion, binaryName),
+		fmt.Sprintf("https://github.com/zczy-k/FloatingGateway/releases/download/%s/%s", targetVersion, binaryName),
+	}
+
+	var downloadedData []byte
+	var downloadErr error
+
+	for _, url := range downloadURLs {
+		log.Printf("Trying to download from: %s", url)
+		client := &http.Client{Timeout: 5 * time.Minute}
+		resp, err := client.Get(url)
+		if err != nil {
+			downloadErr = err
+			continue
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusOK {
+			downloadErr = fmt.Errorf("download failed with status: %d", resp.StatusCode)
+			continue
+		}
+
+		downloadedData, err = io.ReadAll(resp.Body)
+		if err != nil {
+			downloadErr = err
+			continue
+		}
+
+		log.Printf("Successfully downloaded %d bytes", len(downloadedData))
+		downloadErr = nil
+		break
+	}
+
+	if downloadErr != nil {
+		return fmt.Errorf("failed to download new version: %w", downloadErr)
+	}
+
+	// Get current executable path
+	execPath, err := os.Executable()
+	if err != nil {
+		return fmt.Errorf("failed to get executable path: %w", err)
+	}
+
+	// Write new binary to temp file
+	tmpPath := execPath + ".new"
+	if err := os.WriteFile(tmpPath, downloadedData, 0755); err != nil {
+		return fmt.Errorf("failed to write new binary: %w", err)
+	}
+
+	log.Printf("New binary written to: %s", tmpPath)
+
+	// Replace old binary with new one
+	backupPath := execPath + ".backup"
+	if err := os.Rename(execPath, backupPath); err != nil {
+		os.Remove(tmpPath)
+		return fmt.Errorf("failed to backup old binary: %w", err)
+	}
+
+	if err := os.Rename(tmpPath, execPath); err != nil {
+		// Restore backup on failure
+		os.Rename(backupPath, execPath)
+		return fmt.Errorf("failed to install new binary: %w", err)
+	}
+
+	log.Printf("Upgrade successful, restarting service...")
+
+	// Wait a bit for response to be sent
+	time.Sleep(2 * time.Second)
+
+	// Restart the service
+	if runtime.GOOS == "windows" {
+		// On Windows, just exit and let the service manager restart
+		os.Exit(0)
+	} else {
+		// On Unix, try to restart using the same command
+		cmd := exec.Command(execPath, os.Args[1:]...)
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+		if err := cmd.Start(); err != nil {
+			log.Printf("Failed to restart: %v", err)
+		}
+		os.Exit(0)
+	}
+
+	return nil
 }

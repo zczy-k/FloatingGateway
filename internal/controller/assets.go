@@ -2010,8 +2010,13 @@ document.addEventListener('DOMContentLoaded', () => {
                         '<div class="version-notes">' + escapeHtml(result.release_notes) + '</div>';
                 }
                 
-                downloadBtn.href = result.release_url;
-                downloadBtn.style.display = 'inline-flex';
+                // Add auto-upgrade button
+                html += '<div class="version-actions">' +
+                    '<button id="btn-auto-upgrade" class="btn-primary" style="margin-right: 10px;">自动升级</button>' +
+                    '<a href="' + result.release_url + '" target="_blank" class="btn-secondary">手动下载</a>' +
+                    '</div>';
+                
+                downloadBtn.style.display = 'none'; // Hide the old download button
             } else {
                 html += '<div class="version-status up-to-date">' +
                     '<div class="status-icon">✓</div>' +
@@ -2022,6 +2027,42 @@ document.addEventListener('DOMContentLoaded', () => {
             html += '</div>';
             infoDiv.innerHTML = html;
             log('版本检查完成: 当前 ' + result.current_version + ', 最新 ' + (result.latest_version || 'N/A'));
+            
+            // Add auto-upgrade button handler if update available
+            if (result.has_update) {
+                const upgradeBtn = document.getElementById('btn-auto-upgrade');
+                if (upgradeBtn) {
+                    upgradeBtn.addEventListener('click', async () => {
+                        if (!confirm('确定要自动升级到 ' + result.latest_version + ' 吗？\\n\\n升级过程中服务会短暂中断。')) {
+                            return;
+                        }
+                        
+                        upgradeBtn.disabled = true;
+                        upgradeBtn.textContent = '升级中...';
+                        
+                        try {
+                            log('开始自动升级到 ' + result.latest_version + '...');
+                            const upgradeResult = await apiCall('/upgrade', {
+                                method: 'POST',
+                                body: JSON.stringify({ version: result.latest_version })
+                            });
+                            
+                            log('升级成功！服务将在 5 秒后重启...', 'success');
+                            alert('升级成功！\\n\\n服务将在 5 秒后自动重启。\\n请稍后刷新页面。');
+                            
+                            // Wait and reload
+                            setTimeout(() => {
+                                window.location.reload();
+                            }, 10000);
+                        } catch (e) {
+                            log('自动升级失败: ' + e.message, 'error');
+                            alert('自动升级失败: ' + e.message + '\\n\\n请尝试手动下载升级。');
+                            upgradeBtn.disabled = false;
+                            upgradeBtn.textContent = '自动升级';
+                        }
+                    });
+                }
+            }
         } catch (e) {
             infoDiv.innerHTML = '<div class="version-error">检查更新失败: ' + e.message + '</div>';
             log('检查更新失败: ' + e.message, 'error');
