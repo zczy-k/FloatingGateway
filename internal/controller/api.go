@@ -424,7 +424,58 @@ func (s *Server) handleDetectNet(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Detect local network interface and CIDR
+	// Check if SSH credentials are provided (for remote router detection)
+	var req struct {
+		Host     string `json:"host"`
+		Port     int    `json:"port"`
+		User     string `json:"user"`
+		Password string `json:"password"`
+		KeyFile  string `json:"key_file"`
+	}
+	
+	// Try to decode request body
+	if r.ContentLength > 0 {
+		if err := json.NewDecoder(r.Body).Decode(&req); err == nil && req.Host != "" {
+			// Remote router detection
+			if req.Port == 0 {
+				req.Port = 22
+			}
+			
+			client := NewSSHClient(&SSHConfig{
+				Host:     req.Host,
+				Port:     req.Port,
+				User:     req.User,
+				Password: req.Password,
+				KeyFile:  req.KeyFile,
+				Timeout:  30,
+			})
+			
+			if err := client.Connect(); err != nil {
+				writeError(w, http.StatusInternalServerError, fmt.Errorf("SSH 连接失败: %w", err))
+				return
+			}
+			defer client.Close()
+			
+			// Detect network on remote router
+			iface, cidr, err := s.manager.DetectNetwork(client, req.Host)
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, fmt.Errorf("远程网络探测失败: %w", err))
+				return
+			}
+			
+			// Generate suggested VIP based on CIDR
+			suggestedVIP := s.manager.SuggestVIP(cidr)
+			
+			writeJSON(w, http.StatusOK, map[string]string{
+				"iface":         iface,
+				"cidr":          cidr,
+				"suggested_vip": suggestedVIP,
+			})
+			return
+		}
+	}
+
+	// Local network detection (for global config)
 	iface, cidr, err := detectLocalNetwork()
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, fmt.Errorf("无法检测本机网络: %w", err))
@@ -438,6 +489,7 @@ func (s *Server) handleDetectNet(w http.ResponseWriter, r *http.Request) {
 		"iface":         iface,
 		"cidr":          cidr,
 		"suggested_vip": suggestedVIP,
+	})
 	})
 }
 
