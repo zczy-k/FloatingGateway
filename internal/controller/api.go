@@ -735,7 +735,7 @@ func compareVersions(v1, v2 string) int {
 
 // handleUpgrade handles POST /api/upgrade - auto-upgrade controller to latest version
 func (s *Server) handleUpgrade(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.PostMethod {
+	if r.Method != http.MethodPost {
 		w.WriteHeader(http.StatusMethodNotAllowed)
 		return
 	}
@@ -745,6 +745,12 @@ func (s *Server) handleUpgrade(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+
+	// Validate version format
+	if req.Version == "" {
+		writeError(w, http.StatusBadRequest, fmt.Errorf("version is required"))
 		return
 	}
 
