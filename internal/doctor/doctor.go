@@ -273,7 +273,7 @@ func (d *Doctor) checkKeepalived() CheckResult {
 			
 			// Check if service is enabled
 			if d.platform.ServiceManager == "systemd" {
-				enabledResult := exec.Run("systemctl", "is-enabled", "keepalived")
+				enabledResult := exec.RunWithTimeout("systemctl", 5*time.Second, "is-enabled", "keepalived")
 				if !enabledResult.Success() {
 					details = append(details, "服务未启用（disabled）")
 				}
