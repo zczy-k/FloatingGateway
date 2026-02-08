@@ -459,7 +459,7 @@ func (s *Server) handleDetectNet(w http.ResponseWriter, r *http.Request) {
 			// Detect network on remote router
 			iface, cidr, err := s.manager.DetectNetwork(client, req.Host)
 			if err != nil {
-				writeError(w, http.StatusInternalServerError, fmt.Errorf("远程网络探测失败: %w", err))
+				writeError(w, http.StatusInternalServerError, fmt.Errorf("网络探测失败: %w", err))
 				return
 			}
 			

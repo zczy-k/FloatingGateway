@@ -342,9 +342,9 @@ func (m *Manager) getInterfaceIP(client *SSHClient, iface string) (string, error
 // DetectNetwork tries to find the interface and CIDR for a given IP on the remote host.
 func (m *Manager) DetectNetwork(client *SSHClient, targetIP string) (iface, cidr string, err error) {
 	// Try to get default interface
-	out, err := client.RunCombined("ip route get 8.8.8.8")
+	out, err := client.RunCombined("ip route get 8.8.8.8 2>&1")
 	if err != nil || out == "" {
-		out, err = client.RunCombined("ip route show default | head -n 1")
+		out, err = client.RunCombined("ip route show default 2>&1 | head -n 1")
 	}
 
 	if err == nil && out != "" {
@@ -359,7 +359,7 @@ func (m *Manager) DetectNetwork(client *SSHClient, targetIP string) (iface, cidr
 
 	// If still empty, try to find interface containing the target IP
 	if iface == "" {
-		out, _ = client.RunCombined(fmt.Sprintf("ip -4 addr show to %s", targetIP))
+		out, _ = client.RunCombined(fmt.Sprintf("ip -4 addr show to %s 2>&1", targetIP))
 		if out != "" {
 			re := regexp.MustCompile(`\d+:\s+(\S+):?`)
 			matches := re.FindStringSubmatch(out)
@@ -369,22 +369,45 @@ func (m *Manager) DetectNetwork(client *SSHClient, targetIP string) (iface, cidr
 		}
 	}
 
-	if iface != "" {
-		// Get CIDR for this interface
-		out, err = client.RunCombined(fmt.Sprintf("ip -4 addr show dev %s", iface))
-		if err == nil && out != "" {
-			re := regexp.MustCompile(`inet\s+([0-9./]+)`)
-			matches := re.FindStringSubmatch(out)
-			if len(matches) > 1 {
-				cidrFull := matches[1]
-				// Use proper CIDR calculation
-				cidr = cidrToNetwork(cidrFull)
+	// If still empty, try to list all interfaces and find one with an IP
+	if iface == "" {
+		out, _ = client.RunCombined("ip -4 addr show 2>&1 | grep -E '^[0-9]+:' | head -n 2")
+		if out != "" {
+			// Skip loopback (lo), get the first real interface
+			lines := strings.Split(out, "\n")
+			for _, line := range lines {
+				if !strings.Contains(line, "lo:") {
+					re := regexp.MustCompile(`\d+:\s+(\S+):?`)
+					matches := re.FindStringSubmatch(line)
+					if len(matches) > 1 {
+						iface = matches[1]
+						break
+					}
+				}
 			}
 		}
 	}
 
-	if iface == "" || cidr == "" {
-		return "", "", fmt.Errorf("自动探测失败，请手动输入")
+	if iface == "" {
+		return "", "", fmt.Errorf("无法找到网络接口，请手动输入")
+	}
+
+	// Get CIDR for this interface
+	out, err = client.RunCombined(fmt.Sprintf("ip -4 addr show dev %s 2>&1", iface))
+	if err != nil || out == "" {
+		return "", "", fmt.Errorf("无法获取接口 %s 的地址信息: %v", iface, err)
+	}
+
+	re := regexp.MustCompile(`inet\s+([0-9./]+)`)
+	matches := re.FindStringSubmatch(out)
+	if len(matches) > 1 {
+		cidrFull := matches[1]
+		// Use proper CIDR calculation
+		cidr = cidrToNetwork(cidrFull)
+	}
+
+	if cidr == "" {
+		return "", "", fmt.Errorf("接口 %s 没有配置 IPv4 地址", iface)
 	}
 
 	return iface, cidr, nil
