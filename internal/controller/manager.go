@@ -308,6 +308,37 @@ func (m *Manager) detectPlatform(client *SSHClient) Platform {
 	return PlatformUnknown
 }
 
+// verifyInterface checks if the network interface exists on the remote system
+func (m *Manager) verifyInterface(client *SSHClient, iface string) error {
+	_, err := client.RunCombined(fmt.Sprintf("ip link show %s", iface))
+	if err != nil {
+		return fmt.Errorf("网卡接口 %s 不存在", iface)
+	}
+	return nil
+}
+
+// getInterfaceIP gets the IPv4 address of the specified interface
+func (m *Manager) getInterfaceIP(client *SSHClient, iface string) (string, error) {
+	// Get the first IPv4 address from the interface
+	cmd := fmt.Sprintf("ip -4 addr show dev %s | grep inet | awk '{print $2}' | cut -d/ -f1 | head -n1", iface)
+	output, err := client.RunCombined(cmd)
+	if err != nil {
+		return "", fmt.Errorf("failed to get IP: %w", err)
+	}
+	
+	ip := strings.TrimSpace(output)
+	if ip == "" {
+		return "", fmt.Errorf("网卡 %s 没有配置 IPv4 地址", iface)
+	}
+	
+	// Validate IP format
+	if net.ParseIP(ip) == nil {
+		return "", fmt.Errorf("无效的 IP 地址: %s", ip)
+	}
+	
+	return ip, nil
+}
+
 // DetectNetwork tries to find the interface and CIDR for a given IP on the remote host.
 func (m *Manager) DetectNetwork(client *SSHClient, targetIP string) (iface, cidr string, err error) {
 	// Try to get default interface
@@ -391,7 +422,7 @@ func (r *Router) StepLog(msg string) {
 func (m *Manager) Install(r *Router, agentConfig *config.Config) error {
 	r.InstallLog = nil
 	r.InstallStep = 0
-	r.InstallTotal = 12
+	r.InstallTotal = 13
 	r.Error = ""
 	r.Status = StatusInstalling
 
@@ -410,6 +441,24 @@ func (m *Manager) Install(r *Router, agentConfig *config.Config) error {
 	platform := m.detectPlatform(client)
 	r.Platform = platform
 	r.AddLog("   平台: " + string(platform))
+
+	// Verify interface exists
+	r.StepLog("验证网卡接口...")
+	if err := m.verifyInterface(client, agentConfig.LAN.Iface); err != nil {
+		r.AddLog("!! 网卡接口验证失败: " + err.Error())
+		return fmt.Errorf("interface verification: %w", err)
+	}
+	r.AddLog("   网卡接口 " + agentConfig.LAN.Iface + " 存在")
+
+	// Get SelfIP from interface
+	r.StepLog("获取网卡 IP 地址...")
+	selfIP, err := m.getInterfaceIP(client, agentConfig.LAN.Iface)
+	if err != nil {
+		r.AddLog("!! 获取 IP 失败: " + err.Error())
+		return fmt.Errorf("get interface IP: %w", err)
+	}
+	agentConfig.Routers.SelfIP = selfIP
+	r.AddLog("   网卡 IP: " + selfIP)
 
 	// Determine target architecture
 	r.StepLog("探测系统架构...")
@@ -563,6 +612,14 @@ func (m *Manager) Install(r *Router, agentConfig *config.Config) error {
 	}
 	r.AddLog("   Keepalived 就绪")
 
+	// Install arping for GARP announcements
+	r.StepLog("安装 ARP 工具...")
+	if err := m.installArping(client, platform); err != nil {
+		r.AddLog("   警告: ARP 工具安装失败 (不影响核心功能)")
+	} else {
+		r.AddLog("   ARP 工具已安装")
+	}
+
 	// Verify binary was uploaded correctly and is executable
 	r.StepLog("验证 Agent 二进制文件...")
 	verifyScript := `ls -la /usr/bin/gateway-agent 2>&1
@@ -614,6 +671,14 @@ file /usr/bin/gateway-agent 2>/dev/null || echo 'file command not available'
 
 	r.InstallStep = r.InstallTotal
 	r.AddLog("安装全部完成!")
+	r.AddLog("")
+	r.AddLog("=== 重要提示 ===")
+	r.AddLog("请在主路由的 DHCP 设置中将默认网关改为 VIP: " + agentConfig.LAN.VIP)
+	if platform == PlatformOpenWrt {
+		r.AddLog("OpenWrt 路径: 网络 -> 接口 -> LAN -> 修改 -> DHCP 服务器")
+		r.AddLog("在 DHCP 选项中添加: 3," + agentConfig.LAN.VIP)
+	}
+	r.AddLog("===============")
 	r.Status = StatusOnline
 	return nil
 }
@@ -957,6 +1022,40 @@ func (m *Manager) installKeepalived(client *SSHClient, platform Platform) error 
 	return fmt.Errorf("unsupported platform: %s", platform)
 }
 
+// installArping installs arping tool for GARP announcements
+func (m *Manager) installArping(client *SSHClient, platform Platform) error {
+	// Check if already installed
+	if _, err := client.RunCombined("which arping"); err == nil {
+		return nil
+	}
+
+	switch platform {
+	case PlatformOpenWrt:
+		// Try iputils-arping first, then arping package
+		if _, err := client.RunCombined("opkg install iputils-arping"); err == nil {
+			return nil
+		}
+		if _, err := client.RunCombined("opkg install arping"); err == nil {
+			return nil
+		}
+		return fmt.Errorf("failed to install arping")
+	case PlatformLinux:
+		// Try iputils-arping (Debian/Ubuntu) or iputils (RHEL/CentOS)
+		if _, err := client.RunCombined("apt-get install -y iputils-arping"); err == nil {
+			return nil
+		}
+		if _, err := client.RunCombined("yum install -y iputils"); err == nil {
+			return nil
+		}
+		if _, err := client.RunCombined("yum install -y arping"); err == nil {
+			return nil
+		}
+		return fmt.Errorf("failed to install arping")
+	}
+
+	return fmt.Errorf("unsupported platform: %s", platform)
+}
+
 // setupService sets up the gateway-agent service.
 func (m *Manager) setupService(client *SSHClient, platform Platform) error {
 	switch platform {
@@ -1122,8 +1221,8 @@ func (m *Manager) GenerateAgentConfig(r *Router) (*config.Config, error) {
 		cfg.Health.Mode = m.config.Health.Mode
 	}
 
-	// Set self IP (router's own IP)
-	cfg.Routers.SelfIP = r.Host
+	// SelfIP will be auto-detected from interface during installation
+	// Don't set it here as we don't have SSH access yet
 
 	// Find peer
 	found := false
