@@ -1,0 +1,202 @@
+name: Auto Release
+
+on:
+  push:
+    branches:
+      - main
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - '.gitignore'
+      - 'LICENSE'
+
+env:
+  GO_VERSION: '1.21'
+
+jobs:
+  check-version:
+    name: Check Version and Create Release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    outputs:
+      should_release: ${{ steps.check.outputs.should_release }}
+      new_version: ${{ steps.check.outputs.new_version }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Get latest tag
+        id: get_tag
+        run: |
+          # 获取最新的 tag
+          LATEST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
+          echo "latest_tag=$LATEST_TAG" >> $GITHUB_OUTPUT
+          echo "Latest tag: $LATEST_TAG"
+
+      - name: Calculate new version
+        id: calc_version
+        run: |
+          LATEST_TAG="${{ steps.get_tag.outputs.latest_tag }}"
+          # 移除 v 前缀
+          VERSION=${LATEST_TAG#v}
+          
+          # 分割版本号
+          IFS='.' read -r MAJOR MINOR PATCH <<< "$VERSION"
+          
+          # 检查提交信息，决定版本号增长策略
+          COMMIT_MSG=$(git log -1 --pretty=%B)
+          
+          if echo "$COMMIT_MSG" | grep -qiE "^(feat|feature|新功能|添加)"; then
+            # 新功能：增加 minor 版本
+            MINOR=$((MINOR + 1))
+            PATCH=0
+          elif echo "$COMMIT_MSG" | grep -qiE "^(break|breaking|重大变更)"; then
+            # 重大变更：增加 major 版本
+            MAJOR=$((MAJOR + 1))
+            MINOR=0
+            PATCH=0
+          else
+            # 其他情况（修复、优化等）：增加 patch 版本
+            PATCH=$((PATCH + 1))
+          fi
+          
+          NEW_VERSION="v${MAJOR}.${MINOR}.${PATCH}"
+          echo "new_version=$NEW_VERSION" >> $GITHUB_OUTPUT
+          echo "New version: $NEW_VERSION"
+
+      - name: Check if should release
+        id: check
+        run: |
+          LATEST_TAG="${{ steps.get_tag.outputs.latest_tag }}"
+          NEW_VERSION="${{ steps.calc_version.outputs.new_version }}"
+          
+          # 检查最近的提交是否已经有 tag
+          LATEST_COMMIT=$(git rev-parse HEAD)
+          TAG_COMMIT=$(git rev-list -n 1 "$LATEST_TAG" 2>/dev/null || echo "")
+          
+          if [ "$LATEST_COMMIT" = "$TAG_COMMIT" ]; then
+            echo "should_release=false" >> $GITHUB_OUTPUT
+            echo "Latest commit already has a tag, skipping release"
+          else
+            echo "should_release=true" >> $GITHUB_OUTPUT
+            echo "new_version=$NEW_VERSION" >> $GITHUB_OUTPUT
+            echo "Will create new release: $NEW_VERSION"
+          fi
+
+      - name: Create and push tag
+        if: steps.check.outputs.should_release == 'true'
+        run: |
+          NEW_VERSION="${{ steps.check.outputs.new_version }}"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag -a "$NEW_VERSION" -m "Auto release $NEW_VERSION"
+          git push origin "$NEW_VERSION"
+
+  build-and-release:
+    name: Build and Release
+    needs: check-version
+    if: needs.check-version.outputs.should_release == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: false
+
+      - name: Download dependencies
+        run: go mod tidy
+
+      - name: Build binaries
+        run: |
+          VERSION=${{ needs.check-version.outputs.new_version }}
+          LDFLAGS="-s -w -X github.com/zczy-k/FloatingGateway/internal/controller.Version=$VERSION"
+          mkdir -p dist
+          
+          echo "Building version: $VERSION"
+          
+          # Agent - Linux only (for routers)
+          echo "Building Agent binaries..."
+          GOOS=linux GOARCH=amd64 go build -ldflags "$LDFLAGS" -o dist/gateway-agent-linux-amd64 ./cmd/agent
+          GOOS=linux GOARCH=arm64 go build -ldflags "$LDFLAGS" -o dist/gateway-agent-linux-arm64 ./cmd/agent
+          GOOS=linux GOARCH=arm GOARM=7 go build -ldflags "$LDFLAGS" -o dist/gateway-agent-linux-arm ./cmd/agent
+          GOOS=linux GOARCH=mips GOMIPS=softfloat go build -ldflags "$LDFLAGS" -o dist/gateway-agent-linux-mips ./cmd/agent
+          GOOS=linux GOARCH=mipsle GOMIPS=softfloat go build -ldflags "$LDFLAGS" -o dist/gateway-agent-linux-mipsle ./cmd/agent
+          
+          # Controller - All platforms (for management machine)
+          echo "Building Controller binaries..."
+          GOOS=linux GOARCH=amd64 go build -ldflags "$LDFLAGS" -o dist/gateway-controller-linux-amd64 ./cmd/controller
+          GOOS=linux GOARCH=arm64 go build -ldflags "$LDFLAGS" -o dist/gateway-controller-linux-arm64 ./cmd/controller
+          GOOS=darwin GOARCH=amd64 go build -ldflags "$LDFLAGS" -o dist/gateway-controller-darwin-amd64 ./cmd/controller
+          GOOS=darwin GOARCH=arm64 go build -ldflags "$LDFLAGS" -o dist/gateway-controller-darwin-arm64 ./cmd/controller
+          GOOS=windows GOARCH=amd64 go build -ldflags "$LDFLAGS" -o dist/gateway-controller-windows-amd64.exe ./cmd/controller
+          
+          echo "Build completed!"
+          ls -lh dist/
+
+      - name: Create checksums
+        run: |
+          cd dist
+          sha256sum * > checksums.txt
+          cat checksums.txt
+
+      - name: Generate release notes
+        id: release_notes
+        run: |
+          VERSION=${{ needs.check-version.outputs.new_version }}
+          
+          # 获取上一个 tag
+          PREV_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
+          
+          # 生成更新日志
+          if [ -n "$PREV_TAG" ]; then
+            echo "## 更新内容" > release_notes.md
+            echo "" >> release_notes.md
+            git log ${PREV_TAG}..HEAD --pretty=format:"- %s" --no-merges >> release_notes.md
+          else
+            echo "## 首次发布" > release_notes.md
+            echo "" >> release_notes.md
+            echo "Floating Gateway 首个自动发布版本" >> release_notes.md
+          fi
+          
+          echo "" >> release_notes.md
+          echo "" >> release_notes.md
+          echo "## 下载说明" >> release_notes.md
+          echo "" >> release_notes.md
+          echo "### Agent（路由器端）" >> release_notes.md
+          echo "- \`gateway-agent-linux-amd64\` - Linux x86_64" >> release_notes.md
+          echo "- \`gateway-agent-linux-arm64\` - Linux ARM64" >> release_notes.md
+          echo "- \`gateway-agent-linux-arm\` - Linux ARM v7" >> release_notes.md
+          echo "- \`gateway-agent-linux-mips\` - OpenWrt MIPS" >> release_notes.md
+          echo "- \`gateway-agent-linux-mipsle\` - OpenWrt MIPS LE" >> release_notes.md
+          echo "" >> release_notes.md
+          echo "### Controller（管理端）" >> release_notes.md
+          echo "- \`gateway-controller-linux-amd64\` - Linux x86_64" >> release_notes.md
+          echo "- \`gateway-controller-linux-arm64\` - Linux ARM64" >> release_notes.md
+          echo "- \`gateway-controller-darwin-amd64\` - macOS Intel" >> release_notes.md
+          echo "- \`gateway-controller-darwin-arm64\` - macOS Apple Silicon" >> release_notes.md
+          echo "- \`gateway-controller-windows-amd64.exe\` - Windows 64位" >> release_notes.md
+          echo "" >> release_notes.md
+          echo "### 校验和" >> release_notes.md
+          echo "- \`checksums.txt\` - SHA256 校验和文件" >> release_notes.md
+          
+          cat release_notes.md
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ needs.check-version.outputs.new_version }}
+          name: Release ${{ needs.check-version.outputs.new_version }}
+          body_path: release_notes.md
+          files: |
+            dist/*
+          draft: false
+          prerelease: false
