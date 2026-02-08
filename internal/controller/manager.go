@@ -1141,7 +1141,7 @@ WantedBy=multi-user.target
 func (m *Manager) Uninstall(r *Router) error {
 	r.InstallLog = nil
 	r.InstallStep = 0
-	r.InstallTotal = 5
+	r.InstallTotal = 7
 	r.Error = ""
 	r.Status = StatusUninstalling
 
@@ -1159,34 +1159,70 @@ func (m *Manager) Uninstall(r *Router) error {
 	platform := m.detectPlatform(client)
 	r.AddLog("   平台: " + string(platform))
 
-	// Stop services
+	// Stop and disable gateway-agent service
 	r.StepLog("停止并禁用 Agent 服务...")
 	switch platform {
 	case PlatformOpenWrt:
-		client.RunCombined("/etc/init.d/gateway-agent stop")
-		client.RunCombined("/etc/init.d/gateway-agent disable")
+		client.RunCombined("/etc/init.d/gateway-agent stop 2>/dev/null")
+		client.RunCombined("/etc/init.d/gateway-agent disable 2>/dev/null")
 		client.RemoveFile("/etc/init.d/gateway-agent")
 	case PlatformLinux:
-		client.RunCombined("systemctl stop gateway-agent")
-		client.RunCombined("systemctl disable gateway-agent")
+		client.RunCombined("systemctl stop gateway-agent 2>/dev/null")
+		client.RunCombined("systemctl disable gateway-agent 2>/dev/null")
 		client.RemoveFile("/etc/systemd/system/gateway-agent.service")
 		client.RunCombined("systemctl daemon-reload")
 	}
-	r.AddLog("   服务已停止并移除")
+	r.AddLog("   Agent 服务已停止并移除")
 
-	// Remove files
-	r.StepLog("清理程序文件和配置...")
+	// Stop and disable keepalived service
+	r.StepLog("停止并禁用 Keepalived 服务...")
+	switch platform {
+	case PlatformOpenWrt:
+		client.RunCombined("/etc/init.d/keepalived stop 2>/dev/null")
+		client.RunCombined("/etc/init.d/keepalived disable 2>/dev/null")
+	case PlatformLinux:
+		client.RunCombined("systemctl stop keepalived 2>/dev/null")
+		client.RunCombined("systemctl disable keepalived 2>/dev/null")
+	}
+	r.AddLog("   Keepalived 服务已停止并禁用")
+
+	// Remove VIP from interface if still present
+	r.StepLog("清理 VIP 地址...")
+	if m.config.LAN.VIP != "" && r.Iface != "" {
+		vipCmd := fmt.Sprintf("ip addr del %s/32 dev %s 2>/dev/null || true", m.config.LAN.VIP, r.Iface)
+		client.RunCombined(vipCmd)
+		r.AddLog("   VIP 已清理")
+	} else {
+		r.AddLog("   跳过 VIP 清理（配置不完整）")
+	}
+
+	// Remove keepalived configuration
+	r.StepLog("清理 Keepalived 配置...")
+	client.RemoveFile("/etc/keepalived/keepalived.conf")
+	client.RemoveFile("/etc/keepalived.conf")
+	r.AddLog("   Keepalived 配置已删除")
+
+	// Remove agent files and configuration
+	r.StepLog("清理 Agent 文件和配置...")
 	client.RemoveFile("/usr/bin/gateway-agent")
+	client.RemoveFile("/usr/local/bin/gateway-agent")
 	client.RunCombined("rm -rf /etc/gateway-agent")
-	r.AddLog("   文件已清理")
+	client.RunCombined("rm -rf /var/log/gateway-agent*")
+	client.RunCombined("rm -rf /tmp/gateway-agent*")
+	r.AddLog("   Agent 文件已清理")
 
-	// Restore keepalived default config
-	r.StepLog("停止 Keepalived 服务...")
-	client.RunCombined("systemctl stop keepalived 2>/dev/null || /etc/init.d/keepalived stop 2>/dev/null")
-	r.AddLog("   Keepalived 已停止")
+	// Clean up any remaining state files
+	r.StepLog("清理状态文件...")
+	client.RunCombined("rm -f /tmp/keepalived.*.state 2>/dev/null")
+	client.RunCombined("rm -f /var/run/keepalived.pid 2>/dev/null")
+	r.AddLog("   状态文件已清理")
 
 	r.InstallStep = r.InstallTotal
 	r.AddLog("卸载全部完成!")
+	r.AddLog("")
+	r.AddLog("=== 提示 ===")
+	r.AddLog("如果之前修改了 DHCP 网关设置，请记得改回原来的网关")
+	r.AddLog("===========")
 	r.Status = StatusOnline
 	r.AgentVer = ""
 	r.VRRPState = ""
