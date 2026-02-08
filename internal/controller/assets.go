@@ -1901,9 +1901,6 @@ async function showDoctor(name) {
         reportDiv.innerHTML = '<div class="log-entry error">诊断失败: ' + e.message + '</div>';
     }
 }
-        reportDiv.innerHTML = '<div class="log-entry error">诊断失败: ' + e.message + '</div>';
-    }
-}
 
 async function probeRouter(name) {
     log('正在探测 ' + name + '...');
