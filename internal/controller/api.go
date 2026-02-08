@@ -490,7 +490,6 @@ func (s *Server) handleDetectNet(w http.ResponseWriter, r *http.Request) {
 		"cidr":          cidr,
 		"suggested_vip": suggestedVIP,
 	})
-	})
 }
 
 // detectLocalNetwork detects the local machine's network interface and CIDR
