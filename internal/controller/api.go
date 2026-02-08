@@ -423,53 +423,10 @@ func (s *Server) handleDetectNet(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var onlineRouter *Router
-
-	// Try to parse router info from body (for detecting before adding)
-	if r.ContentLength > 0 {
-		var bodyRouter Router
-		if err := json.NewDecoder(r.Body).Decode(&bodyRouter); err == nil && bodyRouter.Host != "" {
-			onlineRouter = &bodyRouter
-			if onlineRouter.Port == 0 {
-				onlineRouter.Port = 22
-			}
-			if onlineRouter.User == "" {
-				onlineRouter.User = "root"
-			}
-		}
-	}
-
-	// If no router in body, use existing routers
-	if onlineRouter == nil {
-		routers := s.manager.GetRouters()
-		if len(routers) == 0 {
-			writeError(w, http.StatusBadRequest, fmt.Errorf("请先添加一个路由器，或在弹窗中输入 SSH 信息后再试"))
-			return
-		}
-
-		// Try to find an online router
-		for _, router := range routers {
-			if router.Status == StatusOnline {
-				onlineRouter = router
-				break
-			}
-		}
-
-		if onlineRouter == nil {
-			onlineRouter = routers[0]
-		}
-	}
-
-	client := NewSSHClient(s.manager.sshConfig(onlineRouter))
-	if err := client.Connect(); err != nil {
-		writeError(w, http.StatusInternalServerError, fmt.Errorf("无法连接到 %s: %w", onlineRouter.Host, err))
-		return
-	}
-	defer client.Close()
-
-	iface, cidr, err := s.manager.DetectNetwork(client, onlineRouter.Host)
+	// Detect local network interface and CIDR
+	iface, cidr, err := detectLocalNetwork()
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err)
+		writeError(w, http.StatusInternalServerError, fmt.Errorf("无法检测本机网络: %w", err))
 		return
 	}
 
@@ -481,6 +438,49 @@ func (s *Server) handleDetectNet(w http.ResponseWriter, r *http.Request) {
 		"cidr":          cidr,
 		"suggested_vip": suggestedVIP,
 	})
+}
+
+// detectLocalNetwork detects the local machine's network interface and CIDR
+func detectLocalNetwork() (iface, cidr string, err error) {
+	interfaces, err := net.Interfaces()
+	if err != nil {
+		return "", "", err
+	}
+
+	// Find the first non-loopback interface with an IPv4 address
+	for _, i := range interfaces {
+		// Skip loopback and down interfaces
+		if i.Flags&net.FlagLoopback != 0 || i.Flags&net.FlagUp == 0 {
+			continue
+		}
+
+		addrs, err := i.Addrs()
+		if err != nil {
+			continue
+		}
+
+		for _, addr := range addrs {
+			var ip net.IP
+			switch v := addr.(type) {
+			case *net.IPNet:
+				ip = v.IP
+			case *net.IPAddr:
+				ip = v.IP
+			}
+
+			// Skip if not IPv4 or is loopback
+			if ip == nil || ip.IsLoopback() || ip.To4() == nil {
+				continue
+			}
+
+			// Found a valid interface
+			iface = i.Name
+			cidr = addr.String()
+			return iface, cidr, nil
+		}
+	}
+
+	return "", "", fmt.Errorf("未找到有效的网络接口")
 }
 
 // handleInstallAll handles POST /api/routers/install-all

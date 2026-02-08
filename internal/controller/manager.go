@@ -666,9 +666,17 @@ func (m *Manager) Doctor(r *Router) (string, error) {
 	defer client.Close()
 
 	// Run doctor with absolute path and get JSON output
+	// Note: doctor may return non-zero exit code if there are errors, but output is still valid JSON
 	output, err := client.RunCombined("/usr/bin/gateway-agent doctor --json")
+	
+	// If there's output (even with error), try to return it as it's likely valid JSON
+	if output != "" {
+		return output, nil
+	}
+	
+	// Only return error if there's no output at all
 	if err != nil {
-		return "", fmt.Errorf("run doctor: %w (output: %s)", err, output)
+		return "", fmt.Errorf("run doctor: %w", err)
 	}
 
 	return output, nil

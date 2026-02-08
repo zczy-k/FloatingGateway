@@ -1859,25 +1859,48 @@ async function showDoctor(name) {
     
     try {
         const report = await apiCall('/routers/' + name + '/doctor');
+        
+        // Check name translations
+        const checkNames = {
+            'interface_exists': '网卡接口',
+            'cidr_valid': '网段配置',
+            'vip_valid': 'VIP 配置',
+            'vip_conflict': 'VIP 冲突检测',
+            'peer_ip_valid': '对端路由器',
+            'keepalived_running': 'Keepalived 服务',
+            'keepalived_config': 'Keepalived 配置',
+            'arping_available': 'ARP 工具'
+        };
+        
         let html = '<div style="display:flex;gap:1rem;margin-bottom:0.75rem;font-size:0.85rem;">' +
             '<div><span style="color:var(--text-muted)">平台:</span> ' + report.platform + '</div>' +
-            '<div><span style="color:var(--text-muted)">角色:</span> ' + (report.role === 'primary' ? '主路由' : '旁路路由') + '</div>' +
+            '<div><span style="color:var(--text-muted)">角色:</span> ' + (report.role === 'primary' ? '主路由' : '旁路由') + '</div>' +
             '</div>';
         
         report.checks.forEach(check => {
+            const displayName = checkNames[check.name] || check.name;
+            const statusIcon = check.status === 'ok' ? '✓' : (check.status === 'warning' ? '⚠' : '✗');
+            
             html += '<div class="doctor-item">' +
                 '<div class="doctor-item-header">' +
-                    '<span class="doctor-item-name">' + check.name + '</span>' +
-                    '<span class="doctor-status ' + check.status + '">' + check.status.toUpperCase() + '</span>' +
+                    '<span class="doctor-item-name">' + statusIcon + ' ' + displayName + '</span>' +
+                    '<span class="doctor-status ' + check.status + '">' + 
+                        (check.status === 'ok' ? '正常' : (check.status === 'warning' ? '警告' : '错误')) + 
+                    '</span>' +
                 '</div>' +
                 '<div class="doctor-message">' + check.message + '</div>' +
                 '</div>';
         });
         
-        html += '<div class="doctor-summary">' + report.summary + '</div>';
+        // Summary with color
+        const summaryClass = report.has_errors ? 'error' : (report.has_warnings ? 'warning' : 'success');
+        html += '<div class="doctor-summary ' + summaryClass + '">' + report.summary + '</div>';
             
         reportDiv.innerHTML = html;
     } catch (e) {
+        reportDiv.innerHTML = '<div class="log-entry error">诊断失败: ' + e.message + '</div>';
+    }
+}
         reportDiv.innerHTML = '<div class="log-entry error">诊断失败: ' + e.message + '</div>';
     }
 }
