@@ -83,6 +83,10 @@ const indexHTML = `<!DOCTYPE html>
                         <button id="btn-refresh" class="btn btn-icon" title="刷新状态">
                             <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 4v6h-6"/><path d="M1 20v-6h6"/><path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/></svg>
                         </button>
+                        <button id="btn-check-update" class="btn btn-ghost" title="检查更新">
+                            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                            检查更新
+                        </button>
                         <button id="btn-global-config" class="btn btn-ghost">
                             <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg>
                             全局设置
@@ -223,6 +227,25 @@ const indexHTML = `<!DOCTYPE html>
                         <button type="submit" class="btn btn-primary">保存设置</button>
                     </div>
                 </form>
+            </div>
+        </div>
+
+        <!-- Version Update Modal -->
+        <div id="modal-version" class="modal">
+            <div class="modal-content modal-sm">
+                <div class="modal-header">
+                    <h3>版本信息</h3>
+                    <button type="button" class="modal-close" onclick="closeModal('modal-version')">&times;</button>
+                </div>
+                <div class="modal-body">
+                    <div id="version-info">
+                        <div class="loading">正在检查更新...</div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-ghost" onclick="closeModal('modal-version')">关闭</button>
+                    <a id="version-download-btn" href="#" target="_blank" class="btn btn-primary" style="display:none;">前往下载</a>
+                </div>
             </div>
         </div>
     </div>
@@ -1212,12 +1235,21 @@ select {
     border: 1px dashed var(--border);
     color: var(--text-muted);
     text-align: center;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
 }
 
 .probe-result.success {
     background: rgba(16, 185, 129, 0.1);
     border: 1px solid var(--success);
+}
+
+.probe-result.success .probe-header {
     color: var(--success);
+    font-weight: 600;
+    margin-bottom: 0.5rem;
 }
 
 .probe-result.error {
@@ -1226,25 +1258,65 @@ select {
     color: var(--danger);
 }
 
+.probe-result.warning {
+    background: rgba(210, 153, 34, 0.1);
+    border: 1px solid var(--warning);
+    color: var(--warning);
+}
+
 .probe-result .probe-detail {
     display: flex;
     flex-direction: column;
-    gap: 0.25rem;
+    gap: 0.4rem;
     margin-top: 0.5rem;
-    font-size: 0.8rem;
+    font-size: 0.82rem;
     color: var(--text);
+    background: var(--bg-card);
+    padding: 0.6rem 0.75rem;
+    border-radius: var(--radius);
 }
 
 .probe-result .probe-detail span {
     display: flex;
     justify-content: space-between;
+    align-items: center;
+}
+
+.probe-result .probe-detail .probe-label {
+    color: var(--text-muted);
+    font-size: 0.78rem;
 }
 
 .probe-result .probe-detail code {
-    font-family: monospace;
+    font-family: 'SF Mono', 'Cascadia Code', 'Consolas', monospace;
+    background: var(--bg-input);
+    padding: 0.15rem 0.5rem;
+    border-radius: 4px;
+    color: var(--primary);
+    font-weight: 500;
+}
+
+.probe-result .probe-hint {
+    margin-top: 0.5rem;
+    font-size: 0.78rem;
+    color: var(--text-secondary);
+    padding: 0.5rem;
     background: var(--bg-card);
-    padding: 0.1rem 0.4rem;
-    border-radius: 3px;
+    border-radius: var(--radius);
+}
+
+.probe-spinner {
+    display: inline-block;
+    width: 14px;
+    height: 14px;
+    border: 2px solid var(--border);
+    border-top-color: var(--primary);
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+    to { transform: rotate(360deg); }
 }
 
 @keyframes fadeIn {
@@ -1275,6 +1347,116 @@ select {
         width: 100%;
         justify-content: center;
     }
+}
+
+/* Version info styles */
+.version-info-container {
+    text-align: center;
+}
+
+.version-current {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    margin-bottom: 1rem;
+    padding: 1rem;
+    background: var(--bg-input);
+    border-radius: var(--radius);
+}
+
+.version-current .version-label {
+    color: var(--text-muted);
+    font-size: 0.85rem;
+}
+
+.version-current .version-value {
+    font-family: 'SF Mono', 'Cascadia Code', 'Consolas', monospace;
+    font-size: 1.1rem;
+    font-weight: 600;
+    color: var(--primary);
+}
+
+.version-status {
+    padding: 1rem;
+    border-radius: var(--radius);
+    margin-bottom: 1rem;
+}
+
+.version-status.up-to-date {
+    background: var(--success-bg);
+    border: 1px solid var(--success);
+}
+
+.version-status.up-to-date .status-icon {
+    color: var(--success);
+    font-size: 2rem;
+    margin-bottom: 0.5rem;
+}
+
+.version-status.up-to-date .status-text {
+    color: var(--success);
+    font-weight: 600;
+}
+
+.version-status.has-update {
+    background: var(--warning-bg);
+    border: 1px solid var(--warning);
+}
+
+.version-status.has-update .status-icon {
+    color: var(--warning);
+    font-size: 2rem;
+    margin-bottom: 0.5rem;
+}
+
+.version-status.has-update .status-text {
+    color: var(--warning);
+    font-weight: 600;
+}
+
+.version-status.has-update .new-version {
+    margin-top: 0.5rem;
+    font-size: 0.9rem;
+    color: var(--text);
+}
+
+.version-status.has-update .new-version code {
+    font-family: 'SF Mono', 'Cascadia Code', 'Consolas', monospace;
+    background: var(--bg-card);
+    padding: 0.15rem 0.5rem;
+    border-radius: 4px;
+    color: var(--warning);
+    font-weight: 600;
+}
+
+.version-notes {
+    text-align: left;
+    padding: 0.75rem;
+    background: var(--bg-card);
+    border-radius: var(--radius);
+    font-size: 0.82rem;
+    color: var(--text-secondary);
+    max-height: 150px;
+    overflow-y: auto;
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+
+.version-notes-title {
+    font-size: 0.78rem;
+    color: var(--text-muted);
+    margin-bottom: 0.5rem;
+    text-align: left;
+}
+
+.version-error {
+    padding: 1rem;
+    background: var(--danger-bg);
+    border: 1px solid var(--danger);
+    border-radius: var(--radius);
+    color: var(--danger);
+    font-size: 0.85rem;
 }`
 
 const appJS = `// Gateway Controller UI
@@ -1288,6 +1470,12 @@ function $$(sel) { return document.querySelectorAll(sel); }
 
 function formatTime(date) {
     return new Date(date).toLocaleTimeString();
+}
+
+function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
 }
 
 function log(msg, type = 'info') {
@@ -1790,6 +1978,56 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
 
+    // Check update button
+    $('#btn-check-update').addEventListener('click', async () => {
+        const infoDiv = $('#version-info');
+        const downloadBtn = $('#version-download-btn');
+        infoDiv.innerHTML = '<div class="loading">正在检查更新...</div>';
+        downloadBtn.style.display = 'none';
+        openModal('modal-version');
+        
+        try {
+            const result = await apiCall('/version');
+            let html = '<div class="version-info-container">';
+            
+            // Current version
+            html += '<div class="version-current">' +
+                '<span class="version-label">当前版本:</span>' +
+                '<span class="version-value">' + (result.current_version || 'unknown') + '</span>' +
+                '</div>';
+            
+            if (result.error) {
+                html += '<div class="version-error">检查更新失败: ' + result.error + '</div>';
+            } else if (result.has_update) {
+                html += '<div class="version-status has-update">' +
+                    '<div class="status-icon">⬆</div>' +
+                    '<div class="status-text">发现新版本!</div>' +
+                    '<div class="new-version">最新版本: <code>' + result.latest_version + '</code></div>' +
+                    '</div>';
+                
+                if (result.release_notes) {
+                    html += '<div class="version-notes-title">更新说明:</div>' +
+                        '<div class="version-notes">' + escapeHtml(result.release_notes) + '</div>';
+                }
+                
+                downloadBtn.href = result.release_url;
+                downloadBtn.style.display = 'inline-flex';
+            } else {
+                html += '<div class="version-status up-to-date">' +
+                    '<div class="status-icon">✓</div>' +
+                    '<div class="status-text">已是最新版本</div>' +
+                    '</div>';
+            }
+            
+            html += '</div>';
+            infoDiv.innerHTML = html;
+            log('版本检查完成: 当前 ' + result.current_version + ', 最新 ' + (result.latest_version || 'N/A'));
+        } catch (e) {
+            infoDiv.innerHTML = '<div class="version-error">检查更新失败: ' + e.message + '</div>';
+            log('检查更新失败: ' + e.message, 'error');
+        }
+    });
+
     // Detect network button
     $('#btn-detect-net').addEventListener('click', async () => {
         const btn = $('#btn-detect-net');
@@ -1830,18 +2068,25 @@ document.addEventListener('DOMContentLoaded', () => {
         const probeResult = $('#probe-result');
         
         if (!host) {
-            showToast('请先输入主机地址', 'warning');
+            probeResult.style.display = 'block';
+            probeResult.className = 'probe-result error';
+            probeResult.innerHTML = '✗ 请先输入主机地址';
+            return;
+        }
+        if (!user) {
+            probeResult.style.display = 'block';
+            probeResult.className = 'probe-result error';
+            probeResult.innerHTML = '✗ 请先输入 SSH 用户名';
             return;
         }
         if (!password && !key_file) {
-            if (!confirm('你没有填写 SSH 密码或私钥路径，探测可能会因为权限不足而失败。是否继续？')) {
-                return;
-            }
+            probeResult.style.display = 'block';
+            probeResult.className = 'probe-result warning';
+            probeResult.innerHTML = '⚠ 未填写 SSH 密码或私钥路径，探测可能会失败';
         }
 
         const btn = $('#btn-router-probe');
         const probeText = btn.querySelector('.probe-text');
-        const probeIcon = btn.querySelector('.probe-icon');
         btn.disabled = true;
         const originalText = probeText.textContent;
         probeText.textContent = '正在连接...';
@@ -1849,7 +2094,7 @@ document.addEventListener('DOMContentLoaded', () => {
         // Show loading state in result area
         probeResult.style.display = 'block';
         probeResult.className = 'probe-result loading';
-        probeResult.innerHTML = '正在探测 ' + host + ' 的网络环境...';
+        probeResult.innerHTML = '<span class="probe-spinner"></span> 正在探测 ' + host + ' 的网络环境...';
         
         try {
             log('正在探测 ' + host + '...');
@@ -1861,41 +2106,74 @@ document.addEventListener('DOMContentLoaded', () => {
             });
             log('探测成功: ' + result.iface + ' (' + result.cidr + ')', 'success');
             
-            // Show success in result area
-            probeResult.className = 'probe-result success';
-            probeResult.innerHTML = '✓ SSH 连接成功，网络探测完成' +
-                '<div class="probe-detail">' +
-                    '<span>网卡接口 <code>' + result.iface + '</code></span>' +
-                    '<span>网段 <code>' + result.cidr + '</code></span>' +
-                    (result.suggested_vip ? '<span>建议 VIP <code>' + result.suggested_vip + '</code></span>' : '') +
-                '</div>';
+            // Store result for later use
+            window._lastProbeResult = result;
             
-            // Suggest filling global config if empty
+            // Show success in result area with apply button
             const currentCfg = await apiCall('/config');
-            if (!currentCfg.lan.iface || !currentCfg.lan.cidr) {
-                if (confirm('探测到网段: ' + result.cidr + '\n网卡: ' + result.iface + (result.suggested_vip ? '\n建议 VIP: ' + result.suggested_vip : '') + '\n\n是否将其设为全局默认配置？')) {
-                    await apiCall('/config', {
-                        method: 'PUT',
-                        body: JSON.stringify({
-                            lan: {
-                                iface: result.iface,
-                                cidr: result.cidr,
-                                vip: currentCfg.lan.vip || result.suggested_vip || ''
+            const needsConfig = !currentCfg.lan.iface || !currentCfg.lan.cidr;
+            
+            probeResult.className = 'probe-result success';
+            probeResult.innerHTML = '<div class="probe-header">✓ SSH 连接成功，网络探测完成</div>' +
+                '<div class="probe-detail">' +
+                    '<span><span class="probe-label">网卡接口</span> <code>' + result.iface + '</code></span>' +
+                    '<span><span class="probe-label">网段</span> <code>' + result.cidr + '</code></span>' +
+                    (result.suggested_vip ? '<span><span class="probe-label">建议 VIP</span> <code>' + result.suggested_vip + '</code></span>' : '') +
+                '</div>' +
+                (needsConfig ? '<button type="button" class="btn btn-sm btn-primary probe-apply-btn" id="btn-apply-probe-config" style="margin-top: 0.75rem; width: 100%;">应用到全局配置</button>' : '');
+            
+            // Add click handler for apply button if shown
+            if (needsConfig) {
+                setTimeout(() => {
+                    const applyBtn = document.getElementById('btn-apply-probe-config');
+                    if (applyBtn) {
+                        applyBtn.addEventListener('click', async () => {
+                            applyBtn.disabled = true;
+                            applyBtn.textContent = '正在应用...';
+                            try {
+                                const cfg = await apiCall('/config');
+                                await apiCall('/config', {
+                                    method: 'PUT',
+                                    body: JSON.stringify({
+                                        lan: {
+                                            iface: result.iface,
+                                            cidr: result.cidr,
+                                            vip: cfg.lan.vip || result.suggested_vip || ''
+                                        }
+                                    })
+                                });
+                                log('已自动更新全局网络配置', 'success');
+                                showToast('全局网络配置已更新', 'success');
+                                applyBtn.textContent = '✓ 已应用';
+                                applyBtn.classList.remove('btn-primary');
+                                applyBtn.classList.add('btn-ghost');
+                            } catch (e) {
+                                log('应用配置失败: ' + e.message, 'error');
+                                showToast('应用失败: ' + e.message, 'error');
+                                applyBtn.disabled = false;
+                                applyBtn.textContent = '应用到全局配置';
                             }
-                        })
-                    });
-                    log('已自动更新全局网络配置', 'success');
-                    showToast('全局网络配置已更新', 'success');
-                }
-            } else {
-                showToast('探测成功! 网卡: ' + result.iface + ' 网段: ' + result.cidr, 'success');
+                        });
+                    }
+                }, 0);
             }
+            
+            showToast('探测成功! 网卡: ' + result.iface + ' 网段: ' + result.cidr, 'success');
         } catch (e) {
             log('探测失败: ' + e.message, 'error');
-            // Show error in result area
+            // Show error in result area with more details
             probeResult.className = 'probe-result error';
-            probeResult.innerHTML = '✗ 探测失败: ' + e.message;
-            showToast('探测失败: ' + e.message, 'error');
+            let errorHint = '';
+            if (e.message.includes('connection refused')) {
+                errorHint = '<div class="probe-hint">提示: 请检查 SSH 端口是否正确，目标主机是否已启动 SSH 服务</div>';
+            } else if (e.message.includes('authentication')) {
+                errorHint = '<div class="probe-hint">提示: 请检查 SSH 用户名和密码/私钥是否正确</div>';
+            } else if (e.message.includes('timeout') || e.message.includes('i/o timeout')) {
+                errorHint = '<div class="probe-hint">提示: 连接超时，请检查网络连通性和防火墙设置</div>';
+            } else if (e.message.includes('no route')) {
+                errorHint = '<div class="probe-hint">提示: 无法到达主机，请检查 IP 地址是否正确</div>';
+            }
+            probeResult.innerHTML = '✗ 探测失败: ' + e.message + errorHint;
         } finally {
             btn.disabled = false;
             probeText.textContent = originalText;

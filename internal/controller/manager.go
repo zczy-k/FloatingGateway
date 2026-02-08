@@ -419,16 +419,67 @@ func (m *Manager) Install(r *Router, agentConfig *config.Config) error {
 	}
 	arch = strings.TrimSpace(arch)
 
-	// For MIPS, auto-detect endianness if uname just returns "mips"
-	if arch == "mips" {
-		if endian, err := client.RunCombined("echo -n I | hexdump -o | head -n1 | awk '{print $2}'"); err == nil {
+	// For MIPS/MIPS64, auto-detect endianness if uname just returns "mips" or "mips64"
+	if arch == "mips" || arch == "mips64" {
+		// Try multiple methods for endianness detection (busybox compatibility)
+		endianDetected := false
+		
+		// Method 1: Use hexdump (most common)
+		if endian, err := client.RunCombined("echo -n I | hexdump -o 2>/dev/null | head -n1 | awk '{print $2}'"); err == nil && strings.TrimSpace(endian) != "" {
 			endian = strings.TrimSpace(endian)
 			if endian == "0000049" { // little-endian
-				arch = "mipsle"
-				r.AddLog("   检测到 MIPS 小端序 (little-endian)")
-			} else {
-				r.AddLog("   检测到 MIPS 大端序 (big-endian)")
+				if arch == "mips" {
+					arch = "mipsle"
+				} else {
+					arch = "mips64le"
+				}
+				r.AddLog("   检测到 " + strings.ToUpper(arch[:len(arch)-2]) + " 小端序 (little-endian)")
+				endianDetected = true
+			} else if endian != "" {
+				r.AddLog("   检测到 " + strings.ToUpper(arch) + " 大端序 (big-endian)")
+				endianDetected = true
 			}
+		}
+		
+		// Method 2: Check /proc/cpuinfo for byte order
+		if !endianDetected {
+			if cpuinfo, err := client.RunCombined("grep -i 'byte order' /proc/cpuinfo 2>/dev/null | head -n1"); err == nil && cpuinfo != "" {
+				cpuinfo = strings.ToLower(cpuinfo)
+				if strings.Contains(cpuinfo, "little") {
+					if arch == "mips" {
+						arch = "mipsle"
+					} else {
+						arch = "mips64le"
+					}
+					r.AddLog("   检测到 " + strings.ToUpper(arch[:len(arch)-2]) + " 小端序 (via cpuinfo)")
+					endianDetected = true
+				} else if strings.Contains(cpuinfo, "big") {
+					r.AddLog("   检测到 " + strings.ToUpper(arch) + " 大端序 (via cpuinfo)")
+					endianDetected = true
+				}
+			}
+		}
+		
+		// Method 3: Check system type in /proc/cpuinfo for common routers
+		if !endianDetected {
+			if sysType, err := client.RunCombined("grep -i 'system type' /proc/cpuinfo 2>/dev/null | head -n1"); err == nil && sysType != "" {
+				sysType = strings.ToLower(sysType)
+				// Common little-endian MIPS systems: MediaTek MT76xx, Atheros QCA9xxx, etc.
+				if strings.Contains(sysType, "mt7") || strings.Contains(sysType, "mediatek") ||
+					strings.Contains(sysType, "qca") || strings.Contains(sysType, "atheros") {
+					if arch == "mips" {
+						arch = "mipsle"
+					} else {
+						arch = "mips64le"
+					}
+					r.AddLog("   检测到 " + strings.ToUpper(arch[:len(arch)-2]) + " 小端序 (via system type)")
+					endianDetected = true
+				}
+			}
+		}
+		
+		if !endianDetected {
+			r.AddLog("   警告: 无法确定 MIPS 字节序，假设为大端序")
 		}
 	}
 
@@ -643,16 +694,30 @@ func normalizeArch(arch string) string {
 	switch arch {
 	case "x86_64", "amd64":
 		return "amd64"
-	case "i386", "i686":
+	case "i386", "i686", "i586":
 		return "386"
 	case "aarch64", "arm64":
 		return "arm64"
-	case "armv7l", "armv8l", "armv6l":
+	case "armv7l", "armv8l", "armv6l", "armv5l", "arm":
 		return "arm"
 	case "mips":
 		return "mips"
 	case "mipsel", "mipsle":
 		return "mipsle"
+	case "mips64":
+		return "mips64"
+	case "mips64el", "mips64le":
+		return "mips64le"
+	case "riscv64":
+		return "riscv64"
+	case "loongarch64":
+		return "loong64"
+	case "ppc64le":
+		return "ppc64le"
+	case "ppc64":
+		return "ppc64"
+	case "s390x":
+		return "s390x"
 	default:
 		return arch
 	}

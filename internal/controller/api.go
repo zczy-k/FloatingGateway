@@ -41,6 +41,7 @@ func (s *Server) setupRoutes() {
 	s.mux.HandleFunc("/api/config", s.handleConfig)
 	s.mux.HandleFunc("/api/detect-net", s.handleDetectNet)
 	s.mux.HandleFunc("/api/routers/install-all", s.handleInstallAll)
+	s.mux.HandleFunc("/api/version", s.handleVersion)
 
 	// Static files (web UI)
 	s.mux.HandleFunc("/", s.handleStatic)
@@ -597,4 +598,130 @@ func getEmbeddedAsset(path string) ([]byte, string, bool) {
 	}
 
 	return content, contentType, true
+}
+
+// handleVersion handles GET /api/version - returns current and latest version info
+func (s *Server) handleVersion(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Get current version from build info
+	currentVersion := getCurrentVersion()
+
+	// Get latest version from GitHub API
+	latestVersion, releaseURL, releaseNotes, err := getLatestReleaseInfo()
+	if err != nil {
+		writeJSON(w, http.StatusOK, map[string]interface{}{
+			"current_version": currentVersion,
+			"latest_version":  "",
+			"has_update":      false,
+			"error":           err.Error(),
+		})
+		return
+	}
+
+	hasUpdate := compareVersions(currentVersion, latestVersion) < 0
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"current_version": currentVersion,
+		"latest_version":  latestVersion,
+		"has_update":      hasUpdate,
+		"release_url":     releaseURL,
+		"release_notes":   releaseNotes,
+	})
+}
+
+// getCurrentVersion returns the current version of the controller
+func getCurrentVersion() string {
+	// Try to get version from build info (set via ldflags during build)
+	// Fallback to a default if not set
+	return Version
+}
+
+// Version is set via ldflags during build: -ldflags "-X github.com/zczy-k/FloatingGateway/internal/controller.Version=v1.0.0"
+var Version = "dev"
+
+// getLatestReleaseInfo fetches the latest release info from GitHub
+func getLatestReleaseInfo() (version, url, notes string, err error) {
+	client := &http.Client{Timeout: 10 * time.Second}
+
+	// GitHub API for latest release
+	apiURL := "https://api.github.com/repos/zczy-k/FloatingGateway/releases/latest"
+
+	req, err := http.NewRequest("GET", apiURL, nil)
+	if err != nil {
+		return "", "", "", err
+	}
+	req.Header.Set("Accept", "application/vnd.github.v3+json")
+	req.Header.Set("User-Agent", "FloatingGateway-Controller")
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", "", "", fmt.Errorf("请求 GitHub API 失败: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return "", "", "", fmt.Errorf("GitHub API 返回状态码: %d", resp.StatusCode)
+	}
+
+	var release struct {
+		TagName string `json:"tag_name"`
+		HTMLURL string `json:"html_url"`
+		Body    string `json:"body"`
+	}
+
+	if err := json.NewDecoder(resp.Body).Decode(&release); err != nil {
+		return "", "", "", fmt.Errorf("解析 GitHub API 响应失败: %w", err)
+	}
+
+	return release.TagName, release.HTMLURL, release.Body, nil
+}
+
+// compareVersions compares two version strings (e.g., "v1.0.0" vs "v1.1.0")
+// Returns -1 if v1 < v2, 0 if v1 == v2, 1 if v1 > v2
+func compareVersions(v1, v2 string) int {
+	// Strip 'v' prefix if present
+	v1 = strings.TrimPrefix(v1, "v")
+	v2 = strings.TrimPrefix(v2, "v")
+
+	// Handle dev version
+	if v1 == "dev" || v1 == "" {
+		return -1
+	}
+	if v2 == "dev" || v2 == "" {
+		return 1
+	}
+
+	parts1 := strings.Split(v1, ".")
+	parts2 := strings.Split(v2, ".")
+
+	maxLen := len(parts1)
+	if len(parts2) > maxLen {
+		maxLen = len(parts2)
+	}
+
+	for i := 0; i < maxLen; i++ {
+		var n1, n2 int
+		if i < len(parts1) {
+			// Extract numeric part (handle suffixes like "0-beta")
+			numStr := strings.Split(parts1[i], "-")[0]
+			fmt.Sscanf(numStr, "%d", &n1)
+		}
+		if i < len(parts2) {
+			numStr := strings.Split(parts2[i], "-")[0]
+			fmt.Sscanf(numStr, "%d", &n2)
+		}
+
+		if n1 < n2 {
+			return -1
+		}
+		if n1 > n2 {
+			return 1
+		}
+	}
+
+	return 0
 }
