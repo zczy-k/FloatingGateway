@@ -344,7 +344,7 @@ func (m *Manager) DetectNetwork(client *SSHClient, targetIP string) (iface, cidr
 	// First, try to find interface containing the target IP (most accurate)
 	out, _ := client.RunCombined(fmt.Sprintf("ip -4 addr show to %s 2>&1", targetIP))
 	if out != "" {
-		re := regexp.MustCompile(`\d+:\s+(\S+):?`)
+		re := regexp.MustCompile(`\d+:\s+(\S+?):`)
 		matches := re.FindStringSubmatch(out)
 		if len(matches) > 1 {
 			iface = matches[1]
@@ -357,7 +357,7 @@ func (m *Manager) DetectNetwork(client *SSHClient, targetIP string) (iface, cidr
 		out, _ = client.RunCombined("ip -4 addr show 2>&1 | grep -E 'inet (10\\.|172\\.(1[6-9]|2[0-9]|3[01])\\.|192\\.168\\.)' -B 2")
 		if out != "" {
 			// Find the interface name from the output
-			re := regexp.MustCompile(`\d+:\s+(\S+):?`)
+			re := regexp.MustCompile(`\d+:\s+(\S+?):`)
 			matches := re.FindStringSubmatch(out)
 			if len(matches) > 1 {
 				iface = matches[1]
