@@ -1432,6 +1432,8 @@ async function apiCall(endpoint, options = {}) {
 
 // Status update
 let refreshTimer = null;
+let previousRouterStates = {}; // Track previous states to detect changes
+
 async function refreshStatus() {
     try {
         const [status, cfg] = await Promise.all([
@@ -1444,7 +1446,35 @@ async function refreshStatus() {
         $('#vip-address').textContent = status.vip || '-';
         $('#current-master').textContent = status.current_master || '无';
         
-        routers = status.routers || [];
+        const newRouters = status.routers || [];
+        
+        // Detect state changes and show notifications
+        newRouters.forEach(router => {
+            const prevState = previousRouterStates[router.name];
+            const currState = router.status;
+            
+            if (prevState && prevState !== currState) {
+                // State changed - check for completion
+                if (prevState === 'installing' && currState === 'online') {
+                    showToast('✓ ' + router.name + ' Agent 安装成功！', 'success', 5000);
+                    log(router.name + ' Agent 安装成功', 'success');
+                } else if (prevState === 'installing' && currState === 'error') {
+                    showToast('✗ ' + router.name + ' 安装失败: ' + (router.error || '未知错误'), 'error', 6000);
+                    log(router.name + ' 安装失败: ' + (router.error || '未知错误'), 'error');
+                } else if (prevState === 'uninstalling' && currState === 'online') {
+                    showToast('✓ ' + router.name + ' Agent 已卸载', 'success', 5000);
+                    log(router.name + ' Agent 卸载成功', 'success');
+                } else if (prevState === 'uninstalling' && currState === 'error') {
+                    showToast('✗ ' + router.name + ' 卸载失败: ' + (router.error || '未知错误'), 'error', 6000);
+                    log(router.name + ' 卸载失败: ' + (router.error || '未知错误'), 'error');
+                }
+            }
+            
+            // Update previous state
+            previousRouterStates[router.name] = currState;
+        });
+        
+        routers = newRouters;
         renderRouters();
         updateWizard();
 
