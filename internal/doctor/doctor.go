@@ -334,11 +334,29 @@ func (d *Doctor) checkKeepalviedConfig() CheckResult {
 		if strings.Contains(errMsg, "track script") && strings.Contains(errMsg, "not found") {
 			// Test if gateway-agent check command works
 			agentBinary := keepalived.FindAgentBinary()
-			testResult := exec.RunWithTimeout(agentBinary, 5*time.Second, "check", "--mode="+string(d.cfg.Health.Mode))
-			if !testResult.Success() {
-				suggestion = fmt.Sprintf("健康检查脚本无法执行。gateway-agent 路径: %s。错误: %s", agentBinary, testResult.Combined())
+			
+			// First check if the binary exists
+			if _, err := os.Stat(agentBinary); os.IsNotExist(err) {
+				suggestion = fmt.Sprintf("gateway-agent 二进制文件不存在: %s。请重新安装 Agent", agentBinary)
 			} else {
-				suggestion = fmt.Sprintf("健康检查脚本路径可能错误。当前配置使用: %s。请运行 'gateway-agent apply' 重新生成配置", agentBinary)
+				// Check if it's executable
+				fileInfo, _ := os.Stat(agentBinary)
+				if fileInfo != nil && fileInfo.Mode()&0111 == 0 {
+					suggestion = fmt.Sprintf("gateway-agent 没有执行权限: %s。请运行: chmod +x %s", agentBinary, agentBinary)
+				} else {
+					// Try to execute it
+					testResult := exec.RunWithTimeout(agentBinary, 5*time.Second, "check", "--mode="+string(d.cfg.Health.Mode))
+					errOutput := strings.TrimSpace(testResult.Combined())
+					if !testResult.Success() {
+						if errOutput == "" {
+							suggestion = fmt.Sprintf("健康检查脚本执行失败（无错误输出）。gateway-agent 路径: %s。退出码: %d", agentBinary, testResult.ExitCode)
+						} else {
+							suggestion = fmt.Sprintf("健康检查脚本无法执行。gateway-agent 路径: %s。错误: %s", agentBinary, errOutput)
+						}
+					} else {
+						suggestion = fmt.Sprintf("健康检查脚本可以执行，但 keepalived 无法找到。请运行 'gateway-agent apply' 重新生成配置", agentBinary)
+					}
+				}
 			}
 		} else if strings.Contains(errMsg, "interface") && strings.Contains(errMsg, "doesn't exist") {
 			suggestion = "网卡接口不存在。请检查配置文件中的 interface 设置"
