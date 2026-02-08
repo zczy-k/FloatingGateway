@@ -157,9 +157,10 @@ const indexHTML = `<!DOCTYPE html>
                         </div>
                         <div class="form-group" style="margin-top: 1rem;">
                             <button type="button" class="btn btn-sm btn-ghost" id="btn-router-probe" style="width: 100%; justify-content: center; border-style: dashed; gap: 0.6rem;">
-                                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
-                                测试 SSH 连接并探测网络环境
+                                <svg class="probe-icon" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
+                                <span class="probe-text">测试 SSH 连接并探测网络环境</span>
                             </button>
+                            <div id="probe-result" class="probe-result" style="display: none;"></div>
                             <small class="form-hint" style="text-align: center;">点击后将尝试使用上方填写的信息登录路由器并自动获取网卡与网段</small>
                         </div>
                         <div class="form-group">
@@ -1197,6 +1198,60 @@ select {
     to { opacity: 1; transform: translateX(0); }
 }
 
+/* Probe result in modal */
+.probe-result {
+    margin-top: 0.75rem;
+    padding: 0.75rem 1rem;
+    border-radius: var(--radius);
+    font-size: 0.85rem;
+    animation: fadeIn 0.3s ease;
+}
+
+.probe-result.loading {
+    background: var(--bg-surface);
+    border: 1px dashed var(--border);
+    color: var(--text-muted);
+    text-align: center;
+}
+
+.probe-result.success {
+    background: rgba(16, 185, 129, 0.1);
+    border: 1px solid var(--success);
+    color: var(--success);
+}
+
+.probe-result.error {
+    background: rgba(239, 68, 68, 0.1);
+    border: 1px solid var(--danger);
+    color: var(--danger);
+}
+
+.probe-result .probe-detail {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+    margin-top: 0.5rem;
+    font-size: 0.8rem;
+    color: var(--text);
+}
+
+.probe-result .probe-detail span {
+    display: flex;
+    justify-content: space-between;
+}
+
+.probe-result .probe-detail code {
+    font-family: monospace;
+    background: var(--bg-card);
+    padding: 0.1rem 0.4rem;
+    border-radius: 3px;
+}
+
+@keyframes fadeIn {
+    from { opacity: 0; }
+    to { opacity: 1; }
+}
+
 /* Responsive for wizard */
 @media (max-width: 640px) {
     .wizard-progress {
@@ -1367,6 +1422,11 @@ function openAddRouterWithRole(role) {
     const form = $('#form-add-router');
     form.reset();
     form.role.value = role;
+    // Reset probe result area
+    const probeResult = $('#probe-result');
+    probeResult.style.display = 'none';
+    probeResult.className = 'probe-result';
+    probeResult.innerHTML = '';
     openModal('modal-add-router');
 }
 
@@ -1704,6 +1764,13 @@ document.addEventListener('DOMContentLoaded', () => {
     
     // Add router button
     $('#btn-add-router').addEventListener('click', () => {
+        const form = $('#form-add-router');
+        form.reset();
+        // Reset probe result area
+        const probeResult = $('#probe-result');
+        probeResult.style.display = 'none';
+        probeResult.className = 'probe-result';
+        probeResult.innerHTML = '';
         openModal('modal-add-router');
     });
     
@@ -1760,11 +1827,12 @@ document.addEventListener('DOMContentLoaded', () => {
         const password = form.password.value;
         const key_file = form.key_file.value;
         const port = parseInt(form.port.value) || 22;
+        const probeResult = $('#probe-result');
         
         if (!host) {
-              showToast('请先输入主机地址', 'warning');
-              return;
-          }
+            showToast('请先输入主机地址', 'warning');
+            return;
+        }
         if (!password && !key_file) {
             if (!confirm('你没有填写 SSH 密码或私钥路径，探测可能会因为权限不足而失败。是否继续？')) {
                 return;
@@ -1772,9 +1840,16 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         const btn = $('#btn-router-probe');
+        const probeText = btn.querySelector('.probe-text');
+        const probeIcon = btn.querySelector('.probe-icon');
         btn.disabled = true;
-        const originalText = btn.textContent;
-        btn.textContent = '探测中...';
+        const originalText = probeText.textContent;
+        probeText.textContent = '正在连接...';
+        
+        // Show loading state in result area
+        probeResult.style.display = 'block';
+        probeResult.className = 'probe-result loading';
+        probeResult.innerHTML = '正在探测 ' + host + ' 的网络环境...';
         
         try {
             log('正在探测 ' + host + '...');
@@ -1786,20 +1861,29 @@ document.addEventListener('DOMContentLoaded', () => {
             });
             log('探测成功: ' + result.iface + ' (' + result.cidr + ')', 'success');
             
+            // Show success in result area
+            probeResult.className = 'probe-result success';
+            probeResult.innerHTML = '✓ SSH 连接成功，网络探测完成' +
+                '<div class="probe-detail">' +
+                    '<span>网卡接口 <code>' + result.iface + '</code></span>' +
+                    '<span>网段 <code>' + result.cidr + '</code></span>' +
+                    (result.suggested_vip ? '<span>建议 VIP <code>' + result.suggested_vip + '</code></span>' : '') +
+                '</div>';
+            
             // Suggest filling global config if empty
             const currentCfg = await apiCall('/config');
-              if (!currentCfg.lan.iface || !currentCfg.lan.cidr) {
-                  if (confirm('探测到网段: ' + result.cidr + '\n网卡: ' + result.iface + (result.suggested_vip ? '\n建议 VIP: ' + result.suggested_vip : '') + '\n\n是否将其设为全局默认配置？')) {
-                      await apiCall('/config', {
-                          method: 'PUT',
-                          body: JSON.stringify({
-                              lan: {
-                                  iface: result.iface,
-                                  cidr: result.cidr,
-                                  vip: currentCfg.lan.vip || result.suggested_vip || ''
-                              }
-                          })
-                      });
+            if (!currentCfg.lan.iface || !currentCfg.lan.cidr) {
+                if (confirm('探测到网段: ' + result.cidr + '\n网卡: ' + result.iface + (result.suggested_vip ? '\n建议 VIP: ' + result.suggested_vip : '') + '\n\n是否将其设为全局默认配置？')) {
+                    await apiCall('/config', {
+                        method: 'PUT',
+                        body: JSON.stringify({
+                            lan: {
+                                iface: result.iface,
+                                cidr: result.cidr,
+                                vip: currentCfg.lan.vip || result.suggested_vip || ''
+                            }
+                        })
+                    });
                     log('已自动更新全局网络配置', 'success');
                     showToast('全局网络配置已更新', 'success');
                 }
@@ -1808,10 +1892,13 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         } catch (e) {
             log('探测失败: ' + e.message, 'error');
+            // Show error in result area
+            probeResult.className = 'probe-result error';
+            probeResult.innerHTML = '✗ 探测失败: ' + e.message;
             showToast('探测失败: ' + e.message, 'error');
         } finally {
             btn.disabled = false;
-            btn.textContent = originalText;
+            probeText.textContent = originalText;
         }
     });
     
