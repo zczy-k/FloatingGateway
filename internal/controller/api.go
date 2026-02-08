@@ -260,7 +260,11 @@ func (s *Server) handleRouterInstall(w http.ResponseWriter, r *http.Request, rou
 	}
 
 	// Generate config for this router
-	agentConfig := s.manager.GenerateAgentConfig(router)
+	agentConfig, err := s.manager.GenerateAgentConfig(router)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
 
 	// Start installation in background
 	router.Status = StatusInstalling

@@ -161,7 +161,7 @@ get_installed_version() {
 get_latest_version() {
     local api_url="https://api.github.com/repos/zczy-k/FloatingGateway/releases/latest"
     if [ -n "$GH_PROXY" ]; then
-        api_url="${GH_PROXY}${api_url}"
+        api_url="${GH_PROXY}/${api_url}"
     fi
     local tag=""
     if command -v curl >/dev/null 2>&1; then
@@ -182,6 +182,14 @@ download_with_proxy() {
     local url="$1"
     local target="$2"
     local success=0
+    
+    # 清理 URL：去掉已有的代理前缀，还原为原始 GitHub URL
+    for _p in $GH_PROXIES; do
+        url="${url#${_p}/}"
+    done
+    if [ -n "$GH_PROXY" ]; then
+        url="${url#${GH_PROXY}/}"
+    fi
     
     # 先尝试加速镜像
     for proxy in $GH_PROXIES; do

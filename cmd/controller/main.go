@@ -327,7 +327,11 @@ func installCmd(args []string) {
 
 	for _, router := range routers {
 		fmt.Printf("正在 %s 上安装 Agent...\n", router.Name)
-		agentConfig := manager.GenerateAgentConfig(router)
+		agentConfig, err := manager.GenerateAgentConfig(router)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "  失败: %v\n", err)
+			continue
+		}
 		if err := manager.Install(router, agentConfig); err != nil {
 			fmt.Fprintf(os.Stderr, "  失败: %v\n", err)
 		} else {

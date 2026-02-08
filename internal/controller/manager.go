@@ -966,7 +966,8 @@ func (m *Manager) GetConfig() *ControllerConfig {
 }
 
 // GenerateAgentConfig creates a config.Config for a router.
-func (m *Manager) GenerateAgentConfig(r *Router) *config.Config {
+// Returns an error if no peer router is found (at least 2 routers required for HA).
+func (m *Manager) GenerateAgentConfig(r *Router) (*config.Config, error) {
 	cfg := config.DefaultConfig()
 	cfg.Role = r.Role
 	cfg.LAN.VIP = m.config.LAN.VIP
@@ -978,14 +979,19 @@ func (m *Manager) GenerateAgentConfig(r *Router) *config.Config {
 	}
 
 	// Find peer
+	found := false
 	for _, other := range m.config.Routers {
 		if other.Name != r.Name {
 			cfg.Routers.PeerIP = other.Host
+			found = true
 			break
 		}
 	}
+	if !found {
+		return nil, fmt.Errorf("未找到对端路由器，安装 Agent 需要至少配置两台路由器 (primary + secondary)")
+	}
 
-	return cfg
+	return cfg, nil
 }
 
 // ValidateConfig validates the controller configuration.
