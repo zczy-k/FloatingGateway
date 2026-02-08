@@ -882,10 +882,14 @@ func (m *Manager) downloadAgentBinary(r *Router, goos, goarch string) (string, e
 			continue
 		}
 
-		// Rename temp to final
+		// Rename temp to final (use copy if rename fails due to cross-device)
 		if err := os.Rename(tmpPath, destPath); err != nil {
+			// If rename fails, try copy + delete
+			if err := copyFile(tmpPath, destPath); err != nil {
+				os.Remove(tmpPath)
+				return "", fmt.Errorf("移动文件失败: %w", err)
+			}
 			os.Remove(tmpPath)
-			return "", fmt.Errorf("重命名文件失败: %w", err)
 		}
 
 		if err := os.Chmod(destPath, 0755); err != nil {
@@ -897,6 +901,27 @@ func (m *Manager) downloadAgentBinary(r *Router, goos, goarch string) (string, e
 	}
 
 	return "", fmt.Errorf("所有下载源均失败，请检查网络连接或手动将 %s 放到 %s 目录", binaryName, cacheDir)
+}
+
+// copyFile copies a file from src to dst
+func copyFile(src, dst string) error {
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+
+	out, err := os.Create(dst)
+	if err != nil {
+		return err
+	}
+	defer out.Close()
+
+	if _, err := io.Copy(out, in); err != nil {
+		return err
+	}
+
+	return out.Close()
 }
 
 // installKeepalived installs keepalived on the remote system.
@@ -1089,6 +1114,9 @@ func (m *Manager) GenerateAgentConfig(r *Router) (*config.Config, error) {
 	if m.config.Health.Mode != "" {
 		cfg.Health.Mode = m.config.Health.Mode
 	}
+
+	// Set self IP (router's own IP)
+	cfg.Routers.SelfIP = r.Host
 
 	// Find peer
 	found := false
