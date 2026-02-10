@@ -45,7 +45,7 @@ const keepalivedTemplate = `# Gateway Agent Keepalived Configuration
 
 global_defs {
     script_user root
-    enable_script_security off
+    enable_script_security
 }
 
 vrrp_script chk_gateway {
@@ -58,7 +58,7 @@ vrrp_script chk_gateway {
 }
 
 vrrp_instance GATEWAY {
-    state {{ if eq .Role "secondary" }}MASTER{{ else }}BACKUP{{ end }}
+    state BACKUP
     interface {{ .Interface }}
     virtual_router_id {{ .VirtualRouterID }}
     priority {{ .Priority }}

@@ -53,7 +53,7 @@ type Router struct {
 	KeyFile      string       `yaml:"key_file,omitempty" json:"key_file,omitempty"`
 	Passphrase   string       `yaml:"passphrase,omitempty" json:"passphrase,omitempty"`
 	Role         config.Role  `yaml:"role" json:"role"`
-	Iface        string       `yaml:"iface,omitempty" json:"iface,omitempty"`       // Per-router interface override
+	Iface        string       `yaml:"iface,omitempty" json:"iface,omitempty"`             // Per-router interface override
 	HealthMode   string       `yaml:"health_mode,omitempty" json:"health_mode,omitempty"` // Per-router health mode (basic/internet)
 	Status       RouterStatus `yaml:"-" json:"status"`
 	Platform     Platform     `yaml:"-" json:"platform"`
@@ -87,9 +87,9 @@ type ControllerConfig struct {
 	Listen       string    `yaml:"listen" json:"listen"`
 	Password     string    `yaml:"password" json:"password"` // Basic Auth password
 	Routers      []*Router `yaml:"routers" json:"routers"`
-	AgentBin     string    `yaml:"agent_bin" json:"agent_bin"`           // Path to gateway-agent binary (manual override)
-	DownloadBase string    `yaml:"download_base" json:"download_base"`   // Release download base URL
-	GHProxy      string    `yaml:"gh_proxy" json:"gh_proxy"`             // GitHub acceleration proxy for China
+	AgentBin     string    `yaml:"agent_bin" json:"agent_bin"`         // Path to gateway-agent binary (manual override)
+	DownloadBase string    `yaml:"download_base" json:"download_base"` // Release download base URL
+	GHProxy      string    `yaml:"gh_proxy" json:"gh_proxy"`           // GitHub acceleration proxy for China
 	LAN          struct {
 		VIP   string `yaml:"vip" json:"vip"`
 		CIDR  string `yaml:"cidr" json:"cidr"`
@@ -373,17 +373,17 @@ func (m *Manager) getInterfaceIP(client *SSHClient, iface string) (string, error
 	if err != nil {
 		return "", fmt.Errorf("failed to get IP: %w", err)
 	}
-	
+
 	ip := strings.TrimSpace(output)
 	if ip == "" {
 		return "", fmt.Errorf("网卡 %s 没有配置 IPv4 地址", iface)
 	}
-	
+
 	// Validate IP format
 	if net.ParseIP(ip) == nil {
 		return "", fmt.Errorf("无效的 IP 地址: %s", ip)
 	}
-	
+
 	return ip, nil
 }
 
@@ -434,9 +434,9 @@ func (m *Manager) DetectNetwork(client *SSHClient, targetIP string) (iface, cidr
 				if f == "dev" && i+1 < len(fields) {
 					testIface := fields[i+1]
 					// Skip common WAN interface names
-					if !strings.Contains(testIface, "pppoe") && 
-					   !strings.Contains(testIface, "wan") && 
-					   testIface != "eth1" {
+					if !strings.Contains(testIface, "pppoe") &&
+						!strings.Contains(testIface, "wan") &&
+						testIface != "eth1" {
 						iface = testIface
 					}
 					break
@@ -609,6 +609,9 @@ func (m *Manager) Install(r *Router, agentConfig *config.Config) error {
 	}
 	cleanup = append(cleanup, func() { client.RemoveFile(DefaultAgentPath) })
 
+	// Ensure root ownership and strict permissions to satisfy Keepalived security checks
+	client.RunCombined(fmt.Sprintf("chown root:root %s && chmod 0755 %s", DefaultAgentPath, DefaultAgentPath))
+
 	// Verify upload size immediately
 	expectedSize := len(binData)
 	if sizeOut, err := client.RunCombined(fmt.Sprintf("stat -c %%s %s 2>/dev/null || stat -f %%z %s 2>/dev/null", DefaultAgentPath, DefaultAgentPath)); err != nil {
@@ -631,10 +634,11 @@ func (m *Manager) Install(r *Router, agentConfig *config.Config) error {
 		r.AddLog("!! 生成配置失败: " + err.Error())
 		return fmt.Errorf("generate config: %w", err)
 	}
-	if err := client.WriteFile("/etc/gateway-agent/config.yaml", configData, 0644); err != nil {
+	if err := client.WriteFile("/etc/gateway-agent/config.yaml", configData, 0600); err != nil {
 		r.AddLog("!! 上传配置失败: " + err.Error())
 		return fmt.Errorf("upload config: %w", err)
 	}
+	client.RunCombined("chown root:root /etc/gateway-agent/config.yaml")
 	r.AddLog("   配置已写入")
 
 	// Install keepalived
@@ -700,10 +704,10 @@ file %s 2>/dev/null || echo 'file command not available'
 			client.RunCombined("systemctl stop gateway-agent; systemctl disable gateway-agent; rm /etc/systemd/system/gateway-agent.service; systemctl daemon-reload")
 		}
 	})
-	
+
 	// Wait a moment for services to start
 	time.Sleep(2 * time.Second)
-	
+
 	// Verify keepalived is running
 	if output, err := client.RunCombined("pgrep -x keepalived"); err != nil || output == "" {
 		r.AddLog("   警告: keepalived 未能启动，尝试重新启动...")
@@ -715,7 +719,7 @@ file %s 2>/dev/null || echo 'file command not available'
 			client.RunCombined("systemctl restart keepalived")
 		}
 		time.Sleep(2 * time.Second)
-		
+
 		// Check again
 		if output, err := client.RunCombined("pgrep -x keepalived"); err != nil || output == "" {
 			r.AddLog("   警告: keepalived 仍未运行，可能是健康检查失败")
@@ -800,12 +804,12 @@ func (m *Manager) Doctor(r *Router) (string, error) {
 	// Run doctor with absolute path and get JSON output
 	// Note: doctor may return non-zero exit code if there are errors, but output is still valid JSON
 	output, err := client.RunCombined("/usr/bin/gateway-agent doctor --json")
-	
+
 	// If there's output (even with error), try to return it as it's likely valid JSON
 	if output != "" {
 		return output, nil
 	}
-	
+
 	// Only return error if there's no output at all
 	if err != nil {
 		return "", fmt.Errorf("run doctor: %w", err)
@@ -1104,14 +1108,21 @@ func (m *Manager) installArping(client *SSHClient, platform Platform) error {
 
 	switch platform {
 	case PlatformOpenWrt:
-		// Try iputils-arping first, then arping package
-		if _, err := client.RunCombined("opkg install iputils-arping"); err == nil {
+		// Try multiple arping providers
+		providers := []string{"iputils-arping", "arping", "busybox"}
+		for _, p := range providers {
+			if _, err := client.RunCombined("opkg install " + p); err == nil {
+				// Verify it works
+				if _, err := client.RunCombined("which arping"); err == nil {
+					return nil
+				}
+			}
+		}
+		// If opkg failed, check if busybox already has it
+		if out, err := client.RunCombined("arping 2>&1"); err == nil || strings.Contains(out, "Usage: arping") {
 			return nil
 		}
-		if _, err := client.RunCombined("opkg install arping"); err == nil {
-			return nil
-		}
-		return fmt.Errorf("failed to install arping")
+		return fmt.Errorf("failed to install any arping provider")
 	case PlatformLinux:
 		// Try iputils-arping (Debian/Ubuntu) or iputils (RHEL/CentOS)
 		if _, err := client.RunCombined("apt-get install -y iputils-arping"); err == nil {
@@ -1163,11 +1174,14 @@ start_service() {
 	// Enable services
 	client.RunCombined("/etc/init.d/gateway-agent enable")
 	client.RunCombined("/etc/init.d/keepalived enable")
-	
+
+	// Start gateway-agent
+	client.RunCombined("/etc/init.d/gateway-agent restart")
+
 	// Stop keepalived first (in case it's already running with old config)
 	client.RunCombined("/etc/init.d/keepalived stop")
 	time.Sleep(1 * time.Second)
-	
+
 	// Start keepalived
 	if output, err := client.RunCombined("/etc/init.d/keepalived start"); err != nil {
 		return fmt.Errorf("start keepalived: %w (output: %s)", err, output)
@@ -1200,25 +1214,21 @@ WantedBy=multi-user.target
 	if _, err := client.RunCombined("systemctl daemon-reload"); err != nil {
 		return fmt.Errorf("daemon-reload: %w", err)
 	}
-	
+
 	// Enable services
 	client.RunCombined("systemctl enable keepalived")
 	client.RunCombined("systemctl enable gateway-agent")
-	
+
+	// Start gateway-agent
+	client.RunCombined("systemctl restart gateway-agent")
+
 	// Stop keepalived first (in case it's already running with old config)
 	client.RunCombined("systemctl stop keepalived")
 	time.Sleep(1 * time.Second)
-	
+
 	// Start keepalived
 	if output, err := client.RunCombined("systemctl start keepalived"); err != nil {
-		// Get more details about why it failed
-		statusOutput, _ := client.RunCombined("systemctl status keepalived")
-		return fmt.Errorf("start keepalived: %w (output: %s, status: %s)", err, output, statusOutput)
-	}
-	
-	// Start gateway-agent
-	if _, err := client.RunCombined("systemctl start gateway-agent"); err != nil {
-		return fmt.Errorf("start gateway-agent: %w", err)
+		return fmt.Errorf("start keepalived: %w (output: %s)", err, output)
 	}
 
 	return nil
@@ -1352,15 +1362,15 @@ func (m *Manager) GenerateAgentConfig(r *Router) (*config.Config, error) {
 	cfg.Role = r.Role
 	cfg.LAN.VIP = m.config.LAN.VIP
 	cfg.LAN.CIDR = m.config.LAN.CIDR
-	
+
 	// Router must have its own interface configured
 	if r.Iface == "" {
 		return nil, fmt.Errorf("路由器 %s 未配置网卡接口，请在路由器设置中指定", r.Name)
 	}
 	cfg.LAN.Iface = r.Iface
-	
+
 	cfg.Keepalived.VRID = m.config.Keepalived.VRID
-	
+
 	// Logic Optimization: Set default health mode based on role
 	if r.HealthMode != "" {
 		cfg.Health.Mode = config.HealthMode(r.HealthMode)
@@ -1420,7 +1430,7 @@ func (m *Manager) ValidateConfig() error {
 		if r.Host == m.config.LAN.VIP {
 			return fmt.Errorf("VIP (%s) 冲突: 不能与路由器 %s 的 Host IP 相同", m.config.LAN.VIP, r.Name)
 		}
-		
+
 		if r.User == "" {
 			return fmt.Errorf("router %s: user is required", r.Name)
 		}
