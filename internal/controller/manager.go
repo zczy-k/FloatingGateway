@@ -1231,7 +1231,7 @@ func (m *Manager) installArping(client *SSHClient, platform Platform) error {
 	switch platform {
 	case PlatformOpenWrt:
 		// Try multiple arping providers
-		providers := []string{"iputils-arping", "arping", "busybox"}
+		providers := []string{"iputils-arping", "arping"}
 		for _, p := range providers {
 			if _, err := client.RunCombined("opkg install " + p); err == nil {
 				// Verify it works
@@ -1240,8 +1240,19 @@ func (m *Manager) installArping(client *SSHClient, platform Platform) error {
 				}
 			}
 		}
+
+		// Try update if still failed
+		client.RunCombined("opkg update")
+		for _, p := range providers {
+			if _, err := client.RunCombined("opkg install " + p); err == nil {
+				if _, err := client.RunCombined("which arping"); err == nil {
+					return nil
+				}
+			}
+		}
+
 		// If opkg failed, check if busybox already has it
-		if out, err := client.RunCombined("arping 2>&1"); err == nil || strings.Contains(out, "Usage: arping") {
+		if out, _ := client.RunCombined("arping --help 2>&1 || arping 2>&1 || /usr/bin/arping --help 2>&1"); strings.Contains(out, "Usage: arping") {
 			return nil
 		}
 		return fmt.Errorf("failed to install any arping provider")

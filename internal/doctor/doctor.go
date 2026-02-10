@@ -423,21 +423,28 @@ func (d *Doctor) checkArping() CheckResult {
 func (d *Doctor) checkOpenWrtDHCP() CheckResult {
 	result := CheckResult{Name: "openwrt_dhcp_gateway"}
 
-	// Read /etc/config/dhcp to check if gateway is set to VIP
-	data, err := os.ReadFile("/etc/config/dhcp")
-	if err != nil {
-		result.Status = "warning"
-		result.Message = "Cannot read /etc/config/dhcp"
-		return result
-	}
-
-	content := string(data)
+	// Expected option 3 (gateway)
 	expectedOption := fmt.Sprintf("3,%s", d.cfg.LAN.VIP)
 
-	if strings.Contains(content, expectedOption) {
-		result.Status = "ok"
-		result.Message = fmt.Sprintf("DHCP gateway is configured to VIP %s", d.cfg.LAN.VIP)
-		return result
+	// Try to use uci first as it's more accurate
+	uciResult := exec.RunWithTimeout("uci", 5*time.Second, "get", "dhcp.lan.dhcp_option")
+	if uciResult.Success() {
+		if strings.Contains(uciResult.Stdout, expectedOption) {
+			result.Status = "ok"
+			result.Message = fmt.Sprintf("DHCP gateway is configured to VIP %s (via uci)", d.cfg.LAN.VIP)
+			return result
+		}
+	} else {
+		// Fallback to reading file if uci fails or lan section not found
+		data, err := os.ReadFile("/etc/config/dhcp")
+		if err == nil {
+			content := string(data)
+			if strings.Contains(content, expectedOption) {
+				result.Status = "ok"
+				result.Message = fmt.Sprintf("DHCP gateway is configured to VIP %s", d.cfg.LAN.VIP)
+				return result
+			}
+		}
 	}
 
 	result.Status = "warning"
