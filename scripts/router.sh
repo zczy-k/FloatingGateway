@@ -11,7 +11,7 @@
 set -e
 
 # ============== 配置 ==============
-INSTALL_DIR="/etc/gateway-agent"
+INSTALL_DIR="/gateway-agent"
 CONFIG_DIR="/etc/gateway-agent"
 CONFIG_FILE="$CONFIG_DIR/config.yaml"
 BACKUP_DIR="$CONFIG_DIR/backup"
@@ -347,7 +347,7 @@ USE_PROCD=1
 
 start_service() {
     procd_open_instance
-    procd_set_param command /etc/gateway-agent/gateway-agent run
+    procd_set_param command /gateway-agent/gateway-agent run
     procd_set_param respawn
     procd_set_param stdout 1
     procd_set_param stderr 1
@@ -375,7 +375,7 @@ Wants=keepalived.service
 
 [Service]
 Type=simple
-ExecStart=/etc/gateway-agent/gateway-agent run
+ExecStart=/gateway-agent/gateway-agent run
 ExecReload=/bin/kill -HUP $MAINPID
 Restart=always
 RestartSec=5

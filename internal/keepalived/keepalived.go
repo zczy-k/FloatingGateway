@@ -103,7 +103,7 @@ func NewRenderer(cfg *config.Config) *Renderer {
 // Render generates the keepalived configuration.
 func (r *Renderer) Render() (string, error) {
 	data := r.buildTemplateData()
-	
+
 	funcMap := template.FuncMap{
 		"now": func() string {
 			return time.Now().Format(time.RFC3339)
@@ -156,6 +156,7 @@ func (r *Renderer) buildTemplateData() *TemplateData {
 func FindAgentBinary() string {
 	// Standard installation paths for gateway-agent
 	paths := []string{
+		"/gateway-agent/gateway-agent",
 		"/etc/gateway-agent/gateway-agent",
 		"/usr/bin/gateway-agent",
 		"/usr/local/bin/gateway-agent",
@@ -177,7 +178,7 @@ func FindAgentBinary() string {
 		return path
 	}
 	// Default to standard location
-	return "/etc/gateway-agent/gateway-agent"
+	return "/gateway-agent/gateway-agent"
 }
 
 // FindConfigPath finds the keepalived config file path.
@@ -201,7 +202,7 @@ func Apply(cfg *config.Config) error {
 	}
 
 	configPath := FindConfigPath()
-	
+
 	// Ensure directory exists
 	dir := filepath.Dir(configPath)
 	if err := os.MkdirAll(dir, 0755); err != nil {
@@ -307,7 +308,7 @@ func IsRunning() bool {
 	if result.Success() {
 		return true
 	}
-	
+
 	// Fallback to pidof (Standard on OpenWrt/BusyBox)
 	result = exec.RunWithTimeout("pidof", 5*time.Second, "keepalived")
 	return result.Success()

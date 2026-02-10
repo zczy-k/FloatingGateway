@@ -32,7 +32,7 @@ const (
 	StatusError        RouterStatus = "error"
 
 	// DefaultAgentPath is the standard installation path for the agent on remote routers.
-	DefaultAgentPath = "/etc/gateway-agent/gateway-agent"
+	DefaultAgentPath = "/gateway-agent/gateway-agent"
 )
 
 // Platform represents the detected remote platform.
@@ -597,16 +597,27 @@ func (m *Manager) Install(r *Router, agentConfig *config.Config) error {
 		return fmt.Errorf("read binary: %w", err)
 	}
 
-	// Ensure target directories exist
+	// Create agent directory
+	r.StepLog("上传 Agent 二进制文件...")
+	agentDir := filepath.Dir(DefaultAgentPath)
+	if err := client.MkdirAll(agentDir); err != nil {
+		r.AddLog("!! 创建 Agent 目录失败: " + err.Error())
+		return fmt.Errorf("create agent dir: %w", err)
+	}
+	cleanup = append(cleanup, func() { client.RunCombined(fmt.Sprintf("rm -rf %s", agentDir)) })
+
+	// CRITICAL: Ensure root ownership on our directory to satisfy Keepalived security audits.
+	// Since / and /gateway-agent will be root-owned, this path is secure even if /etc or /usr are not.
+	client.RunCombined(fmt.Sprintf("chown root:root %s && chmod 0755 %s", agentDir, agentDir))
+
+	// Create config directory
 	if err := client.MkdirAll("/etc/gateway-agent"); err != nil {
 		r.AddLog("!! 创建配置目录失败: " + err.Error())
 		return fmt.Errorf("create config dir: %w", err)
 	}
 	cleanup = append(cleanup, func() { client.RunCombined("rm -rf /etc/gateway-agent") })
 
-	// CRITICAL: Fix ownership and permissions for the entire path to satisfy Keepalived security audits
-	// Some systems (like the user's P-BOX) have non-root ownership on /usr or other paths.
-	// We force root ownership on our own config/bin directory.
+	// Fix ownership for config directory as well
 	client.RunCombined("chown root:root /etc/gateway-agent && chmod 0755 /etc/gateway-agent")
 
 	if err := client.WriteFile(DefaultAgentPath, binData, 0755); err != nil {
@@ -1245,7 +1256,8 @@ start_service() {
 	// Stop keepalived first (in case it's already running with old config or conflicting config)
 	client.RunCombined("/etc/init.d/keepalived stop")
 	// Kill any stray keepalived processes (especially on iStoreOS/OpenWrt)
-	client.RunCombined("killall -9 keepalived 2>/dev/null")
+	// Use multiple ways to ensure it's killed, even if killall is missing
+	client.RunCombined("pkill -9 keepalived || killall -9 keepalived || (ps -w | grep keepalived | grep -v grep | awk '{print $1}' | xargs kill -9) 2>/dev/null")
 	time.Sleep(1 * time.Second)
 
 	// Force keepalived to use our config file via UCI if possible
@@ -1295,7 +1307,8 @@ WantedBy=multi-user.target
 
 	// Stop keepalived first (in case it's already running with old config or conflicting config)
 	client.RunCombined("systemctl stop keepalived")
-	client.RunCombined("killall -9 keepalived 2>/dev/null")
+	// Use multiple ways to ensure it's killed, even if killall is missing
+	client.RunCombined("pkill -9 keepalived || killall -9 keepalived || (ps -w | grep keepalived | grep -v grep | awk '{print $1}' | xargs kill -9) 2>/dev/null")
 	time.Sleep(1 * time.Second)
 
 	// Start keepalived
