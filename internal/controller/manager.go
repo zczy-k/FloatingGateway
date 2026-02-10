@@ -321,13 +321,13 @@ func (m *Manager) Probe(r *Router) error {
 	}
 
 	// Check agent version (try absolute path first, then PATH)
-	if ver, err := client.RunCombined(fmt.Sprintf("%s version 2>/dev/null || gateway-agent version 2>/dev/null", DefaultAgentPath)); err == nil {
+	if ver, err := client.RunStdout(fmt.Sprintf("%s version 2>/dev/null || gateway-agent version 2>/dev/null", DefaultAgentPath)); err == nil {
 		r.AgentVer = strings.TrimSpace(ver)
 	}
 
 	// Get agent status if installed
 	if r.AgentVer != "" {
-		if output, err := client.RunCombined(fmt.Sprintf("%s status --json 2>/dev/null || gateway-agent status --json 2>/dev/null", DefaultAgentPath)); err == nil {
+		if output, err := client.RunStdout(fmt.Sprintf("%s status --json 2>/dev/null || gateway-agent status --json 2>/dev/null", DefaultAgentPath)); err == nil {
 			var status struct {
 				Keepalived struct {
 					VRRPState string `json:"vrrp_state"`
@@ -336,7 +336,7 @@ func (m *Manager) Probe(r *Router) error {
 					Healthy bool `json:"healthy"`
 				} `json:"health"`
 			}
-			if json.Unmarshal([]byte(output), &status) == nil {
+			if json.Unmarshal([]byte(extractJSON(output)), &status) == nil {
 				r.VRRPState = status.Keepalived.VRRPState
 				healthy := status.Health.Healthy
 				r.Healthy = &healthy
@@ -830,12 +830,12 @@ func (m *Manager) Doctor(r *Router) (string, error) {
 
 	// Run doctor with absolute path and get JSON output
 	// Note: doctor may return non-zero exit code if there are errors, but output is still valid JSON
-	docCmd := fmt.Sprintf("%s doctor --json 2>/dev/null || gateway-agent doctor --json", DefaultAgentPath)
-	output, err := client.RunCombined(docCmd)
+	docCmd := fmt.Sprintf("%s doctor --json 2>/dev/null || gateway-agent doctor --json 2>/dev/null", DefaultAgentPath)
+	output, err := client.RunStdout(docCmd)
 
 	// If there's output (even with error), try to return it as it's likely valid JSON
 	if output != "" {
-		return output, nil
+		return extractJSON(output), nil
 	}
 
 	// Only return error if there's no output at all
@@ -1601,4 +1601,13 @@ func (m *Manager) SuggestVIP(cidr string) string {
 
 	// Default fallback
 	return fmt.Sprintf("%d.%d.%d.254", ip[0], ip[1], ip[2])
+}
+
+func extractJSON(s string) string {
+	start := strings.Index(s, "{")
+	end := strings.LastIndex(s, "}")
+	if start != -1 && end != -1 && end > start {
+		return s[start : end+1]
+	}
+	return s
 }

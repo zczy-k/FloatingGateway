@@ -150,6 +150,12 @@ func (c *SSHClient) RunCombined(cmd string) (string, error) {
 	return strings.TrimSpace(output), err
 }
 
+// RunStdout executes a command and returns only stdout.
+func (c *SSHClient) RunStdout(cmd string) (string, error) {
+	stdout, _, err := c.Run(cmd)
+	return strings.TrimSpace(stdout), err
+}
+
 // RunScript executes multiple commands as a script.
 func (c *SSHClient) RunScript(script string) (string, error) {
 	return c.RunCombined(script)
