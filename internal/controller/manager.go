@@ -715,8 +715,13 @@ file %s 2>/dev/null || echo 'file command not available'
 	// Wait a moment for services to start
 	time.Sleep(2 * time.Second)
 
+	// Ensure root ownership and strict permissions for keepalived config
+	client.RunCombined("chown root:root /etc/keepalived/keepalived.conf && chmod 0644 /etc/keepalived/keepalived.conf")
+
 	// Verify keepalived is running
-	if output, err := client.RunCombined("pgrep -x keepalived"); err != nil || output == "" {
+	// Use both pgrep and pidof for better compatibility across different systems/OpenWrt
+	checkRunningCmd := "pgrep -x keepalived || pidof keepalived"
+	if output, err := client.RunCombined(checkRunningCmd); err != nil || output == "" {
 		r.AddLog("   警告: keepalived 未能启动，尝试重新启动...")
 		// Try to restart keepalived
 		switch platform {
@@ -728,7 +733,7 @@ file %s 2>/dev/null || echo 'file command not available'
 		time.Sleep(3 * time.Second) // Give it more time to start
 
 		// Check again
-		if output, err := client.RunCombined("pgrep -x keepalived"); err != nil || output == "" {
+		if output, err := client.RunCombined(checkRunningCmd); err != nil || output == "" {
 			r.AddLog("!! 错误: Keepalived 服务未能启动")
 			// Try to get more error info
 			var logCmd string
@@ -740,6 +745,10 @@ file %s 2>/dev/null || echo 'file command not available'
 			}
 			if logOut, _ := client.RunCombined(logCmd); logOut != "" {
 				r.AddLog("   系统日志:\n" + logOut)
+			}
+			// One last attempt: check if config file actually exists and has content
+			if confCheck, _ := client.RunCombined("ls -l /etc/keepalived/keepalived.conf && cat /etc/keepalived/keepalived.conf | head -n 5"); confCheck != "" {
+				r.AddLog("   当前配置文件状态:\n" + confCheck)
 			}
 			return fmt.Errorf("keepalived failed to start")
 		} else {
@@ -1238,6 +1247,11 @@ start_service() {
 	// Kill any stray keepalived processes (especially on iStoreOS/OpenWrt)
 	client.RunCombined("killall -9 keepalived 2>/dev/null")
 	time.Sleep(1 * time.Second)
+
+	// Force keepalived to use our config file via UCI if possible
+	client.RunCombined("uci set keepalived.globals=keepalived 2>/dev/null")
+	client.RunCombined("uci set keepalived.globals.config_file='/etc/keepalived/keepalived.conf' 2>/dev/null")
+	client.RunCombined("uci commit keepalived 2>/dev/null")
 
 	// Start keepalived
 	if output, err := client.RunCombined("/etc/init.d/keepalived start"); err != nil {
