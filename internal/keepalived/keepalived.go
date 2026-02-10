@@ -45,6 +45,7 @@ const keepalivedTemplate = `# Gateway Agent Keepalived Configuration
 
 global_defs {
     script_user root
+    enable_script_security off
 }
 
 vrrp_script chk_gateway {
