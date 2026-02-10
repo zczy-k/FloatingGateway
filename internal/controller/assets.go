@@ -84,6 +84,10 @@ const indexHTML = `<!DOCTYPE html>
                         <button id="btn-refresh" class="btn btn-icon" title="刷新状态">
                             <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 4v6h-6"/><path d="M1 20v-6h6"/><path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/></svg>
                         </button>
+                        <button id="btn-show-help" class="btn btn-ghost" title="功能说明">
+                            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 015.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+                            使用说明
+                        </button>
                         <button id="btn-check-update" class="btn btn-ghost" title="检查更新">
                             <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
                             检查更新
@@ -106,6 +110,64 @@ const indexHTML = `<!DOCTYPE html>
                 <div id="logs"></div>
             </section>
         </main>
+
+        <!-- Help Modal -->
+        <div id="modal-help" class="modal">
+            <div class="modal-content modal-lg">
+                <div class="modal-header">
+                    <h3>使用说明与功能指南</h3>
+                    <button type="button" class="modal-close" onclick="closeModal('modal-help')">&times;</button>
+                </div>
+                <div class="modal-body help-body">
+                    <section class="help-section">
+                        <h4>🚀 核心概念</h4>
+                        <p>Floating Gateway 通过 <strong>Keepalived (VRRP)</strong> 技术，在多台路由器之间共享一个<strong>虚拟 IP (VIP)</strong>。客户端将网关设置为该 VIP，当首选路由器故障时，VIP 会自动漂移到备用路由器，实现无感切换。</p>
+                    </section>
+
+                    <section class="help-section">
+                        <h4>🛠️ 关键操作按钮说明</h4>
+                        <div class="help-grid">
+                            <div class="help-card">
+                                <div class="help-card-title">🔍 探测网络</div>
+                                <p>在“添加/编辑”窗口中。点击后会通过 SSH 登录设备，自动识别网卡名称（如 <code>eth0</code>）和当前子网（如 <code>192.168.1.0/24</code>），避免手动输入错误。</p>
+                            </div>
+                            <div class="help-card">
+                                <div class="help-card-title">🩺 诊断报告</div>
+                                <p>执行实时健康检查。检查项包括：网卡状态、VIP 冲突、对端连通性、Keepalived 进程及配置安全审计。<strong>如果 VIP 无法漂移，请先看诊断报告。</strong></p>
+                            </div>
+                            <div class="help-card">
+                                <div class="help-card-title">📦 重装/升级</div>
+                                <p>一键完成：停止旧服务 -> 清理残留进程 -> 上传最新 Agent -> 重新生成 Keepalived 配置 -> 启动服务。适用于首次安装或代码更新后同步配置。</p>
+                            </div>
+                            <div class="help-card">
+                                <div class="help-card-title">🔄 切换主备</div>
+                                <p>仅在集群正常时显示。手动触发 VIP 漂移，常用于停机维护前主动转移流量。</p>
+                            </div>
+                        </div>
+                    </section>
+
+                    <section class="help-section">
+                        <h4>📡 健康检查模式选择</h4>
+                        <ul>
+                            <li><strong>基础模式 (仅检测网关)</strong>：只要路由器系统没死、网线没断，就认为健康。<strong>建议主路由使用。</strong></li>
+                            <li><strong>互联网模式 (检测外网)</strong>：同时探测阿里 DNS、腾讯 DNS 和 114 DNS。只要有 2 个不通，就触发切换。<strong>建议旁路由使用。</strong></li>
+                        </ul>
+                    </section>
+
+                    <section class="help-section warning">
+                        <h4>⚠️ 常见问题与注意事项</h4>
+                        <ul>
+                            <li><strong>PVE/虚拟化环境</strong>：必须在 PVE 网卡设置中<strong>关闭防火墙</strong>或开启 <strong>IP Anti-Spoofing</strong>，否则 VRRP 组播包会被拦截，导致两台路由器都变成 MASTER（抢占冲突）。</li>
+                            <li><strong>DHCP 选项 3</strong>：为了让全家设备自动生效，请在 OpenWrt 的 DHCP 选项中添加 <code>3,虚拟IP地址</code>。</li>
+                            <li><strong>配置路径</strong>：Agent 会在 <code>/gateway-agent/</code> 下运行，请勿手动删除该目录。</li>
+                        </ul>
+                    </section>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-primary" onclick="closeModal('modal-help')">我知道了</button>
+                </div>
+            </div>
+        </div>
 
         <!-- Doctor Report Modal -->
         <div id="modal-doctor" class="modal">
@@ -826,8 +888,84 @@ section {
     animation: modalIn 0.2s ease;
 }
 
-.modal-sm {
-    max-width: 560px;
+.modal-content.modal-sm { max-width: 560px; }
+.modal-content.modal-lg { max-width: 800px; }
+
+/* Help Content Styles */
+.help-body {
+    padding: 1.5rem;
+    max-height: 70vh;
+    overflow-y: auto;
+}
+
+.help-section {
+    margin-bottom: 2rem;
+}
+
+.help-section h4 {
+    color: var(--primary);
+    margin-bottom: 0.75rem;
+    font-size: 1rem;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.help-section p {
+    color: var(--text-secondary);
+    font-size: 0.9rem;
+    line-height: 1.6;
+}
+
+.help-section ul {
+    padding-left: 1.25rem;
+    color: var(--text-secondary);
+}
+
+.help-section li {
+    margin-bottom: 0.5rem;
+    font-size: 0.85rem;
+    line-height: 1.5;
+}
+
+.help-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+    gap: 1rem;
+    margin-top: 1rem;
+}
+
+.help-card {
+    background: var(--bg-input);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 1rem;
+}
+
+.help-card-title {
+    font-weight: 600;
+    color: var(--text);
+    font-size: 0.85rem;
+    margin-bottom: 0.5rem;
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+}
+
+.help-card p {
+    font-size: 0.8rem;
+    margin: 0;
+}
+
+.help-section.warning {
+    background: var(--warning-bg);
+    border-radius: var(--radius);
+    padding: 1rem;
+    border: 1px solid rgba(210, 153, 34, 0.2);
+}
+
+.help-section.warning h4 {
+    color: var(--warning);
 }
 
 @keyframes modalIn {
@@ -2049,6 +2187,11 @@ document.addEventListener('DOMContentLoaded', () => {
         } catch (e) {
             log('获取配置失败: ' + e.message, 'error');
         }
+    });
+
+    // Help button
+    $('#btn-show-help').addEventListener('click', () => {
+        openModal('modal-help');
     });
 
     // Check update button
