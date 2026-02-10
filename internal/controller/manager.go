@@ -108,8 +108,9 @@ const defaultDownloadBase = "https://github.com/zczy-k/FloatingGateway/releases/
 
 // GitHub 加速镜像列表，按优先级排列
 var ghProxies = []string{
-	"https://xuc.xi-xu.me/",
 	"https://gh-proxy.com/",
+	"https://ghproxy.net/",
+	"https://mirror.ghproxy.com/",
 	"https://ghfast.top/",
 }
 
@@ -293,9 +294,13 @@ func (m *Manager) Probe(r *Router) error {
 	}
 	defer client.Close()
 
-	r.Status = StatusOnline
 	r.LastSeen = time.Now()
 	r.Error = ""
+
+	// Do not overwrite installing/uninstalling status
+	if r.Status != StatusInstalling && r.Status != StatusUninstalling {
+		r.Status = StatusOnline
+	}
 
 	// Detect platform
 	r.Platform = m.detectPlatform(client)
@@ -598,7 +603,7 @@ func (m *Manager) Install(r *Router, agentConfig *config.Config) error {
 		return fmt.Errorf("create config dir: %w", err)
 	}
 	cleanup = append(cleanup, func() { client.RunCombined("rm -rf /etc/gateway-agent") })
-	
+
 	// CRITICAL: Fix ownership and permissions for the entire path to satisfy Keepalived security audits
 	// Some systems (like the user's P-BOX) have non-root ownership on /usr or other paths.
 	// We force root ownership on our own config/bin directory.
@@ -660,19 +665,20 @@ func (m *Manager) Install(r *Router, agentConfig *config.Config) error {
 
 	// Verify binary was uploaded correctly and is executable
 	r.StepLog("验证 Agent 二进制文件...")
+	// Check version and ensure it matches what we expect
 	verifyScript := fmt.Sprintf(`ls -la %s 2>&1
 file %s 2>/dev/null || echo 'file command not available'
 %s version 2>&1 || echo 'version check failed'`, DefaultAgentPath, DefaultAgentPath, DefaultAgentPath)
 	if output, err := client.RunCombined(verifyScript); err != nil {
 		r.AddLog("!! 验证失败: " + err.Error())
 		r.AddLog("   输出: " + output)
-		// Check if the file exists but isn't executable
-		if checkOut, _ := client.RunCombined(fmt.Sprintf("test -f %s && echo 'file exists' || echo 'file missing'", DefaultAgentPath)); checkOut != "" {
-			r.AddLog("   文件检查: " + checkOut)
-		}
 		return fmt.Errorf("verify binary: %w", err)
 	} else {
 		r.AddLog("   " + strings.TrimSpace(output))
+		// Version check
+		if !strings.Contains(output, version.Version) && version.Version != "dev" {
+			r.AddLog(fmt.Sprintf("   警告: Agent 版本 (%s) 与控制端版本 (%s) 不匹配", output, version.Version))
+		}
 	}
 
 	// Apply agent config (use absolute path and explicit config path)
@@ -719,12 +725,23 @@ file %s 2>/dev/null || echo 'file command not available'
 		case PlatformLinux:
 			client.RunCombined("systemctl restart keepalived")
 		}
-		time.Sleep(2 * time.Second)
+		time.Sleep(3 * time.Second) // Give it more time to start
 
 		// Check again
 		if output, err := client.RunCombined("pgrep -x keepalived"); err != nil || output == "" {
-			r.AddLog("   警告: keepalived 仍未运行，可能是健康检查失败")
-			r.AddLog("   提示: 请检查网络连接和健康检查配置")
+			r.AddLog("!! 错误: Keepalived 服务未能启动")
+			// Try to get more error info
+			var logCmd string
+			switch platform {
+			case PlatformOpenWrt:
+				logCmd = "logread | grep keepalived | tail -n 20"
+			case PlatformLinux:
+				logCmd = "journalctl -u keepalived -n 20 --no-pager"
+			}
+			if logOut, _ := client.RunCombined(logCmd); logOut != "" {
+				r.AddLog("   系统日志:\n" + logOut)
+			}
+			return fmt.Errorf("keepalived failed to start")
 		} else {
 			r.AddLog("   keepalived 已成功启动")
 		}
@@ -960,24 +977,41 @@ func (m *Manager) downloadAgentBinary(r *Router, goos, goarch string) (string, e
 	// Build candidate URLs: user-configured proxy, then built-in proxies, then direct
 	var urls []string
 
+	// Helper to clean URL
+	cleanURL := func(url string) string {
+		return strings.TrimPrefix(url, "https://")
+	}
+
 	if m.config.GHProxy != "" {
 		// User-configured proxy
 		proxy := m.config.GHProxy
 		if !strings.HasSuffix(proxy, "/") {
 			proxy += "/"
 		}
+		// Some proxies expect the full URL with protocol, others just the domain
 		urls = append(urls, proxy+directURL)
 	}
 
 	// Built-in acceleration proxies
 	for _, proxy := range ghProxies {
+		if !strings.HasSuffix(proxy, "/") {
+			proxy += "/"
+		}
 		urls = append(urls, proxy+directURL)
 	}
 
 	// Direct download as last resort
 	urls = append(urls, directURL)
 
-	client := &http.Client{Timeout: 120 * time.Second}
+	client := &http.Client{
+		Timeout: 180 * time.Second,
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			if len(via) >= 10 {
+				return fmt.Errorf("too many redirects")
+			}
+			return nil
+		},
+	}
 
 	for i, url := range urls {
 		if i > 0 {
@@ -985,8 +1019,16 @@ func (m *Manager) downloadAgentBinary(r *Router, goos, goarch string) (string, e
 		}
 
 		r.AddLog("   下载: " + url)
+		r.AddLog("   提示: 如果下载缓慢，请耐心等待或在全局设置中配置加速镜像")
 
-		resp, err := client.Get(url)
+		req, err := http.NewRequest("GET", url, nil)
+		if err != nil {
+			r.AddLog("   !! 请求构建失败: " + err.Error())
+			continue
+		}
+		req.Header.Set("User-Agent", "FloatingGateway-Controller")
+
+		resp, err := client.Do(req)
 		if err != nil {
 			r.AddLog("   !! 连接失败: " + err.Error())
 			continue
