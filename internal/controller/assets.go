@@ -1127,6 +1127,33 @@ select {
 }
 
 .doctor-status.ok { background: var(--success-bg); color: var(--success); }
+/* Doctor report */
+.doctor-report {
+    background: var(--bg-console);
+    color: #e2e8f0;
+    padding: 1rem;
+    border-radius: var(--radius);
+    font-family: 'JetBrains Mono', 'Fira Code', Consolas, monospace;
+    font-size: 0.85rem;
+    white-space: pre-wrap;
+    max-height: 60vh;
+    overflow-y: auto;
+    border: 1px solid var(--border);
+    line-height: 1.5;
+}
+
+.doctor-report-item {
+    margin-bottom: 0.5rem;
+    display: flex;
+    gap: 0.5rem;
+}
+
+.doctor-status-ok { color: var(--success); }
+.doctor-status-warn { color: var(--warning); }
+.doctor-status-error { color: var(--danger); }
+.doctor-fixed { color: var(--primary); margin-left: 0.5rem; font-size: 0.8rem; }
+.doctor-meta { color: #64748b; font-size: 0.8rem; margin-top: 1rem; border-top: 1px solid #334155; padding-top: 0.5rem; }
+
 .doctor-status.warning { background: var(--warning-bg); color: var(--warning); }
 .doctor-status.error { background: var(--danger-bg); color: var(--danger); }
 

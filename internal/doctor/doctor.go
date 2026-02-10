@@ -66,6 +66,7 @@ func (d *Doctor) Run() *Report {
 	report.Checks = append(report.Checks, d.checkPeerIP())
 	report.Checks = append(report.Checks, d.checkKeepalived())
 	report.Checks = append(report.Checks, d.checkKeepalviedConfig())
+	report.Checks = append(report.Checks, d.checkVRRPMulticast())
 	report.Checks = append(report.Checks, d.checkArping())
 
 	// OpenWrt-specific: DHCP gateway check
@@ -251,10 +252,10 @@ func (d *Doctor) checkKeepalived() CheckResult {
 	if !keepalived.IsRunning() {
 		result.Status = "error"
 		result.CanFix = true
-		
+
 		// Try to get more details about why it's not running
 		var details []string
-		
+
 		// Check if keepalived is installed
 		if !exec.CommandExists("keepalived") {
 			details = append(details, "keepalived 未安装")
@@ -270,14 +271,14 @@ func (d *Doctor) checkKeepalived() CheckResult {
 					details = append(details, fmt.Sprintf("配置文件无效: %s", strings.TrimSpace(validateResult.Combined())))
 				}
 			}
-			
+
 			// Check if service is enabled
 			if d.platform.ServiceManager == "systemd" {
 				enabledResult := exec.RunWithTimeout("systemctl", 5*time.Second, "is-enabled", "keepalived")
 				if !enabledResult.Success() {
 					details = append(details, "服务未启用（disabled）")
 				}
-				
+
 				// Get service status for more info
 				statusResult := exec.RunWithTimeout("systemctl", 5*time.Second, "status", "keepalived")
 				statusOutput := strings.TrimSpace(statusResult.Combined())
@@ -293,7 +294,7 @@ func (d *Doctor) checkKeepalived() CheckResult {
 				}
 			}
 		}
-		
+
 		if len(details) > 0 {
 			result.Message = fmt.Sprintf("keepalived 未运行。原因: %s", strings.Join(details, "; "))
 		} else {
@@ -314,6 +315,18 @@ func (d *Doctor) checkKeepalived() CheckResult {
 
 	result.Status = "ok"
 	result.Message = "keepalived is running"
+
+	// Deep check: Verify VRRP state file
+	stateFile := "/tmp/keepalived.GATEWAY.state"
+	if _, err := os.Stat(stateFile); os.IsNotExist(err) {
+		result.Status = "warning"
+		result.Message = "keepalived 正在运行，但未生成状态文件 (notify 脚本可能执行失败)"
+	} else {
+		content, _ := os.ReadFile(stateFile)
+		state := strings.TrimSpace(string(content))
+		result.Message = fmt.Sprintf("keepalived 运行中 (VRRP状态: %s)", state)
+	}
+
 	return result
 }
 
@@ -342,67 +355,98 @@ func (d *Doctor) checkKeepalviedConfig() CheckResult {
 	validateResult := exec.RunWithTimeout("keepalived", 5*time.Second, "-t", "-f", configPath)
 	if !validateResult.Success() {
 		errMsg := strings.TrimSpace(validateResult.Combined())
-		
+
 		// Analyze common errors
 		var suggestion string
 		if strings.Contains(errMsg, "track script") && strings.Contains(errMsg, "not found") {
 			// Test if gateway-agent check command works
-			agentBinary := keepalived.FindAgentBinary()
-			
-			// First check if the binary exists
-			if _, err := os.Stat(agentBinary); os.IsNotExist(err) {
-				suggestion = fmt.Sprintf("gateway-agent 二进制文件不存在: %s。请重新安装 Agent", agentBinary)
+			checkCmd := fmt.Sprintf("%s check --mode=%s", keepalived.FindAgentBinary(), d.cfg.Health.Mode)
+			if checkOut, err := exec.RunStdout(checkCmd); err != nil {
+				suggestion = fmt.Sprintf("Agent 健康检查命令执行失败: %v", err)
 			} else {
-				// Check if it's executable
-				fileInfo, _ := os.Stat(agentBinary)
-				if fileInfo != nil && fileInfo.Mode()&0111 == 0 {
-					suggestion = fmt.Sprintf("gateway-agent 没有执行权限: %s。请运行: chmod +x %s", agentBinary, agentBinary)
-				} else {
-					// Try to execute it
-					testResult := exec.RunWithTimeout(agentBinary, 5*time.Second, "check", "--mode="+string(d.cfg.Health.Mode))
-					errOutput := strings.TrimSpace(testResult.Combined())
-					exitCode := testResult.ExitCode
-					
-					if exitCode == 1 {
-						// Exit code 1 means health check failed (unhealthy), not script error
-						suggestion = fmt.Sprintf("健康检查脚本正常，但当前健康状态为不健康（这会导致 keepalived 无法启动）。请检查网络连接和健康检查配置（模式: %s）", d.cfg.Health.Mode)
-					} else if !testResult.Success() {
-						if errOutput == "" {
-							suggestion = fmt.Sprintf("健康检查脚本执行失败（无错误输出）。gateway-agent 路径: %s。退出码: %d", agentBinary, exitCode)
-						} else {
-							suggestion = fmt.Sprintf("健康检查脚本执行失败。gateway-agent 路径: %s。错误: %s", agentBinary, errOutput)
-						}
-					} else {
-						suggestion = "健康检查脚本可以执行且健康。请运行 'gateway-agent apply' 重新生成配置"
-					}
-				}
+				suggestion = fmt.Sprintf("Agent 健康检查命令输出: %s", checkOut)
 			}
-		} else if strings.Contains(errMsg, "interface") && strings.Contains(errMsg, "doesn't exist") {
-			suggestion = "网卡接口不存在。请检查配置文件中的 interface 设置"
-		} else if strings.Contains(errMsg, "unicast_src_ip") {
-			suggestion = "缺少 unicast_src_ip 配置。请运行 'gateway-agent apply' 重新生成配置"
-		} else {
-			suggestion = "请运行 'gateway-agent apply' 重新生成配置"
 		}
-		
-		result.Status = "error"
-		result.Message = fmt.Sprintf("配置文件无效: %s。建议: %s", errMsg, suggestion)
-		result.CanFix = true
 
+		result.Status = "error"
+		result.Message = fmt.Sprintf("配置文件无效: %s. %s", errMsg, suggestion)
+
+		// Always try to regenerate config if invalid
+		result.CanFix = true
 		if d.autoFix {
 			if err := keepalived.Apply(d.cfg); err == nil {
 				result.Fixed = true
 				result.Status = "ok"
-				result.Message = "配置文件已重新生成并应用"
-			} else {
-				result.Message = fmt.Sprintf("%s。重新生成失败: %v", result.Message, err)
+				result.Message = "检测到配置无效，已自动重新生成"
 			}
 		}
+
 		return result
 	}
 
+	// Check for security context warnings in logs (e.g., insecure path)
+	if out, err := exec.RunStdout("grep 'Insecure path' /var/log/syslog /var/log/messages 2>/dev/null | tail -n 1"); err == nil && out != "" {
+		result.Status = "warning"
+		result.Message = fmt.Sprintf("检测到路径安全警告: %s (请确保 Agent 安装目录属于 root)", strings.TrimSpace(out))
+	}
+
 	result.Status = "ok"
-	result.Message = fmt.Sprintf("配置文件有效: %s", configPath)
+	result.Message = "配置文件有效"
+	return result
+}
+
+func (d *Doctor) checkVRRPMulticast() CheckResult {
+	result := CheckResult{Name: "vrrp_multicast"}
+
+	// Check if we can receive VRRP packets (if not MASTER)
+	// or send them (if MASTER). This is hard to check passively without tcpdump.
+	// So we check if the interface has the multicast flag and if firewall allows it.
+
+	iface := d.cfg.LAN.Iface
+
+	// 1. Check MULTICAST flag
+	if out, err := exec.RunStdout(fmt.Sprintf("ip link show %s", iface)); err == nil {
+		if !strings.Contains(out, "MULTICAST") {
+			result.Status = "error"
+			result.Message = fmt.Sprintf("网卡 %s 未开启组播功能 (MULTICAST flag missing)", iface)
+			return result
+		}
+	}
+
+	// 2. Check Firewall (Basic check)
+	// OpenWrt
+	if d.platform.OS == "openwrt" {
+		if out, err := exec.RunStdout("uci get firewall.vrrp.target 2>/dev/null"); err != nil || strings.TrimSpace(out) != "ACCEPT" {
+			result.Status = "warning"
+			result.Message = "OpenWrt 防火墙可能未放行 VRRP 协议 (uci get firewall.vrrp.target != ACCEPT)"
+			result.CanFix = true
+			if d.autoFix {
+				// Fix it via uci
+				exec.Run("uci delete firewall.vrrp")
+				exec.Run("uci set firewall.vrrp=rule")
+				exec.Run("uci set firewall.vrrp.name='Allow-VRRP'")
+				exec.Run("uci set firewall.vrrp.src='lan'")
+				exec.Run("uci set firewall.vrrp.proto='112'")
+				exec.Run("uci set firewall.vrrp.target='ACCEPT'")
+				exec.Run("uci commit firewall")
+				exec.Run("/etc/init.d/firewall reload")
+				result.Fixed = true
+				result.Status = "ok"
+				result.Message = "已自动添加防火墙规则放行 VRRP"
+			}
+			return result
+		}
+	}
+
+	// Linux (iptables check)
+	if out, err := exec.RunStdout("iptables -L INPUT -n | grep 112"); err == nil && out == "" {
+		// Only warn if no rule found, as it might be managed by ufw/firewall-cmd
+		result.Status = "warning"
+		result.Message = "iptables 中未发现针对 VRRP (Proto 112) 的放行规则"
+	}
+
+	result.Status = "ok"
+	result.Message = "组播功能已开启，防火墙规则检查通过"
 	return result
 }
 
