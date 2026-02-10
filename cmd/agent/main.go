@@ -335,7 +335,7 @@ func statusCmd(args []string) {
 		Keepalived *keepalived.Status `json:"keepalived"`
 		Health     *policy.Status     `json:"health,omitempty"`
 	}{
-		Version:    version,
+		Version:    version.Version,
 		Role:       string(cfg.Role),
 		Platform:   detect.Detect().String(),
 		Interface:  cfg.LAN.Iface,
