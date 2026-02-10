@@ -172,6 +172,8 @@ install_dependencies() {
             if command -v apt-get >/dev/null 2>&1; then
                 apt-get update -qq
                 apt-get install -y -qq keepalived iproute2 arping curl dnsutils 2>/dev/null || true
+            elif command -v dnf >/dev/null 2>&1; then
+                dnf install -y -q keepalived iproute arping curl bind-utils 2>/dev/null || true
             elif command -v yum >/dev/null 2>&1; then
                 yum install -y -q keepalived iproute arping curl bind-utils 2>/dev/null || true
             elif command -v apk >/dev/null 2>&1; then
@@ -234,6 +236,24 @@ check_agent_up_to_date() {
 install_agent() {
     log "安装 gateway-agent..."
     
+    # 停止旧服务，防止 "Text file busy" 错误
+    if [ -f "/etc/init.d/gateway-agent" ]; then
+        /etc/init.d/gateway-agent stop 2>/dev/null || true
+    fi
+    if command -v systemctl >/dev/null 2>&1 && systemctl is-active gateway-agent >/dev/null 2>&1; then
+        systemctl stop gateway-agent 2>/dev/null || true
+    fi
+    
+    # 强制清理残留进程
+    if command -v pkill >/dev/null 2>&1; then
+        pkill -9 gateway-agent 2>/dev/null || true
+    elif command -v killall >/dev/null 2>&1; then
+        killall -9 gateway-agent 2>/dev/null || true
+    else
+        ps -w | grep gateway-agent | grep -v grep | awk '{print $1}' | xargs kill -9 2>/dev/null || true
+    fi
+    sleep 1
+
     mkdir -p "$INSTALL_DIR"
     
     if [ -n "$ARG_AGENT_PATH" ] && [ -f "$ARG_AGENT_PATH" ]; then

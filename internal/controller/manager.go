@@ -1173,17 +1173,20 @@ func (m *Manager) installKeepalived(client *SSHClient, platform Platform) error 
 		_, err := client.RunCombined("opkg update && opkg install keepalived")
 		return err
 	case PlatformLinux:
-		// Try apt first, then yum
-		if _, err := client.RunCombined("apt-get install -y keepalived"); err == nil {
-			return nil
+		// Try multiple package managers
+		cmds := []string{
+			"apt-get install -y keepalived",
+			"apt-get update && apt-get install -y keepalived",
+			"dnf install -y keepalived",
+			"yum install -y keepalived",
+			"apk add keepalived",
 		}
-		if _, err := client.RunCombined("apt-get update && apt-get install -y keepalived"); err == nil {
-			return nil
+		for _, cmd := range cmds {
+			if _, err := client.RunCombined(cmd); err == nil {
+				return nil
+			}
 		}
-		if _, err := client.RunCombined("yum install -y keepalived"); err == nil {
-			return nil
-		}
-		return fmt.Errorf("failed to install keepalived")
+		return fmt.Errorf("failed to install keepalived using any package manager")
 	}
 
 	return fmt.Errorf("unsupported platform: %s", platform)
@@ -1214,17 +1217,24 @@ func (m *Manager) installArping(client *SSHClient, platform Platform) error {
 		}
 		return fmt.Errorf("failed to install any arping provider")
 	case PlatformLinux:
-		// Try iputils-arping (Debian/Ubuntu) or iputils (RHEL/CentOS)
-		if _, err := client.RunCombined("apt-get install -y iputils-arping"); err == nil {
-			return nil
+		// Try multiple arping providers across different distros
+		cmds := []string{
+			"apt-get install -y iputils-arping",
+			"dnf install -y iputils",
+			"yum install -y iputils",
+			"yum install -y arping",
+			"apk add iputils",
+			"apk add arping",
 		}
-		if _, err := client.RunCombined("yum install -y iputils"); err == nil {
-			return nil
+		for _, cmd := range cmds {
+			if _, err := client.RunCombined(cmd); err == nil {
+				// Verify it works
+				if _, err := client.RunCombined("which arping"); err == nil {
+					return nil
+				}
+			}
 		}
-		if _, err := client.RunCombined("yum install -y arping"); err == nil {
-			return nil
-		}
-		return fmt.Errorf("failed to install arping")
+		return fmt.Errorf("failed to install arping using any package manager")
 	}
 
 	return fmt.Errorf("unsupported platform: %s", platform)
