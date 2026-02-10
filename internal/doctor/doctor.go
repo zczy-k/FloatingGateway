@@ -277,6 +277,20 @@ func (d *Doctor) checkKeepalived() CheckResult {
 				if !enabledResult.Success() {
 					details = append(details, "服务未启用（disabled）")
 				}
+				
+				// Get service status for more info
+				statusResult := exec.RunWithTimeout("systemctl", 5*time.Second, "status", "keepalived")
+				statusOutput := strings.TrimSpace(statusResult.Combined())
+				if strings.Contains(statusOutput, "failed") || strings.Contains(statusOutput, "inactive") {
+					// Extract the most relevant error line
+					lines := strings.Split(statusOutput, "\n")
+					for _, line := range lines {
+						if strings.Contains(line, "Main PID") || strings.Contains(line, "Active:") {
+							details = append(details, strings.TrimSpace(line))
+							break
+						}
+					}
+				}
 			}
 		}
 		

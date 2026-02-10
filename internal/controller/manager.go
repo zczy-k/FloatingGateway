@@ -692,7 +692,32 @@ file /usr/bin/gateway-agent 2>/dev/null || echo 'file command not available'
 		r.AddLog("!! 服务配置失败: " + err.Error())
 		return fmt.Errorf("setup service: %w", err)
 	}
-	r.AddLog("   服务已启动")
+	
+	// Wait a moment for services to start
+	time.Sleep(2 * time.Second)
+	
+	// Verify keepalived is running
+	if output, err := client.RunCombined("pgrep -x keepalived"); err != nil || output == "" {
+		r.AddLog("   警告: keepalived 未能启动，尝试重新启动...")
+		// Try to restart keepalived
+		switch platform {
+		case PlatformOpenWrt:
+			client.RunCombined("/etc/init.d/keepalived restart")
+		case PlatformLinux:
+			client.RunCombined("systemctl restart keepalived")
+		}
+		time.Sleep(2 * time.Second)
+		
+		// Check again
+		if output, err := client.RunCombined("pgrep -x keepalived"); err != nil || output == "" {
+			r.AddLog("   警告: keepalived 仍未运行，可能是健康检查失败")
+			r.AddLog("   提示: 请检查网络连接和健康检查配置")
+		} else {
+			r.AddLog("   keepalived 已成功启动")
+		}
+	} else {
+		r.AddLog("   服务已启动")
+	}
 
 	// Setup firewall
 	r.StepLog("配置防火墙规则...")
@@ -1120,14 +1145,17 @@ start_service() {
 		return err
 	}
 
-	// Enable and start
-	cmds := []string{
-		"/etc/init.d/gateway-agent enable",
-		"/etc/init.d/keepalived enable",
-		"/etc/init.d/keepalived start",
-	}
-	for _, cmd := range cmds {
-		client.RunCombined(cmd)
+	// Enable services
+	client.RunCombined("/etc/init.d/gateway-agent enable")
+	client.RunCombined("/etc/init.d/keepalived enable")
+	
+	// Stop keepalived first (in case it's already running with old config)
+	client.RunCombined("/etc/init.d/keepalived stop")
+	time.Sleep(1 * time.Second)
+	
+	// Start keepalived
+	if output, err := client.RunCombined("/etc/init.d/keepalived start"); err != nil {
+		return fmt.Errorf("start keepalived: %w (output: %s)", err, output)
 	}
 
 	return nil
@@ -1153,18 +1181,29 @@ WantedBy=multi-user.target
 		return err
 	}
 
-	// Reload and start
-	cmds := []string{
-		"systemctl daemon-reload",
-		"systemctl enable keepalived",
-		"systemctl start keepalived",
-		"systemctl enable gateway-agent",
-		"systemctl start gateway-agent",
+	// Reload systemd
+	if _, err := client.RunCombined("systemctl daemon-reload"); err != nil {
+		return fmt.Errorf("daemon-reload: %w", err)
 	}
-	for _, cmd := range cmds {
-		if _, err := client.RunCombined(cmd); err != nil {
-			return fmt.Errorf("run %q: %w", cmd, err)
-		}
+	
+	// Enable services
+	client.RunCombined("systemctl enable keepalived")
+	client.RunCombined("systemctl enable gateway-agent")
+	
+	// Stop keepalived first (in case it's already running with old config)
+	client.RunCombined("systemctl stop keepalived")
+	time.Sleep(1 * time.Second)
+	
+	// Start keepalived
+	if output, err := client.RunCombined("systemctl start keepalived"); err != nil {
+		// Get more details about why it failed
+		statusOutput, _ := client.RunCombined("systemctl status keepalived")
+		return fmt.Errorf("start keepalived: %w (output: %s, status: %s)", err, output, statusOutput)
+	}
+	
+	// Start gateway-agent
+	if _, err := client.RunCombined("systemctl start gateway-agent"); err != nil {
+		return fmt.Errorf("start gateway-agent: %w", err)
 	}
 
 	return nil

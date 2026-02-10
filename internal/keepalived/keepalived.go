@@ -52,8 +52,9 @@ vrrp_script chk_gateway {
     script "{{ .AgentBinary }} check --mode={{ .HealthMode }}"
     interval {{ .CheckInterval }}
     weight {{ .TrackWeight }}
-    fall 2
+    fall 3
     rise 2
+    init_fail
 }
 
 vrrp_instance GATEWAY {
