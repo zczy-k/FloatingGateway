@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/zczy-k/FloatingGateway/internal/config"
+	"github.com/zczy-k/FloatingGateway/internal/version"
 )
 
 // Server represents the HTTP server for the controller.
