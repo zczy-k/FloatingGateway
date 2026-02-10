@@ -905,7 +905,7 @@ func (s *Server) handleVerifyDrift(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	sendEvent("init", "running", fmt.Sprintf("当前主节点: %s, 备节点: %s", master.Name, backup.Name))
+	sendEvent("init", "success", fmt.Sprintf("当前主节点: %s, 备节点: %s", master.Name, backup.Name))
 
 	// 2. Ping VIP Check
 	sendEvent("ping_vip", "running", "正在测试 VIP 连通性...")
@@ -974,7 +974,7 @@ func (s *Server) handleVerifyDrift(w http.ResponseWriter, r *http.Request) {
 			if hasVIP {
 				sendEvent("verify_drift", "error", fmt.Sprintf("诊断结果：备节点 (%s) 已接管 VIP，但控制端无法访问。可能是防火墙拦截了 ICMP 或 ARP 广播未生效。", backup.Name))
 			} else {
-				sendEvent("verify_drift", "error", fmt.Sprintf("诊断结果：备节点 (%s) 未能接管 VIP。当前状态: %s。可能是 VRRP 组播被拦截。", backup.Name, state))
+				sendEvent("verify_drift", "error", fmt.Sprintf("诊断结果：备节点 (%s) 未能接管 VIP。当前状态: %s。可能是 VRRP 组播被拦截 (请检查 PVE/ESXi 网卡防火墙)。", backup.Name, state))
 			}
 		} else {
 			sendEvent("verify_drift", "error", fmt.Sprintf("诊断失败：无法连接到备节点 (%s) 进行检查。", backup.Name))

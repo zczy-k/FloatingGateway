@@ -121,6 +121,11 @@ func runCmd(args []string) {
 	fs.StringVar(configPath, "config", defaultConfigPath, "config file path")
 	fs.Parse(args)
 
+	// Initialize state file with UNKNOWN on startup to clear any test/stale data
+	stateFile := "/tmp/keepalived.GATEWAY.state"
+	os.WriteFile(stateFile, []byte("UNKNOWN"), 0666)
+	os.Chmod(stateFile, 0666)
+
 	cfg, err := loadConfig(*configPath)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
