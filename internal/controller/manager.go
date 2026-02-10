@@ -977,11 +977,6 @@ func (m *Manager) downloadAgentBinary(r *Router, goos, goarch string) (string, e
 	// Build candidate URLs: user-configured proxy, then built-in proxies, then direct
 	var urls []string
 
-	// Helper to clean URL
-	cleanURL := func(url string) string {
-		return strings.TrimPrefix(url, "https://")
-	}
-
 	if m.config.GHProxy != "" {
 		// User-configured proxy
 		proxy := m.config.GHProxy
