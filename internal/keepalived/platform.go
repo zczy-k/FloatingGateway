@@ -86,38 +86,49 @@ func (p *OpenWrtPlatform) FindConfigPath() string {
 }
 
 func (p *OpenWrtPlatform) Reload() error {
-	result := exec.RunWithTimeout("/etc/init.d/keepalived", 10*time.Second, "reload")
-	if result.Success() {
-		return nil
-	}
-	// Fallback to restart if reload not supported
-	result = exec.RunWithTimeout("/etc/init.d/keepalived", 30*time.Second, "restart")
+	// Directly restart process to ensure config is picked up
+	// We cannot use /etc/init.d/keepalived because it overwrites our config
+	
+	// 1. Kill existing process
+	exec.RunWithTimeout("killall", 5*time.Second, "keepalived")
+	
+	// 2. Start new process with our config
+	// -n: don't fork (let agent manage it? no, better let it fork for now to avoid blocking)
+	// Actually, we want it to run in background.
+	// -D: log to syslog
+	// -f: config file
+	
+	// Note: We use nohup or & equivalent to detach, but exec.Command waits.
+	// Keepalived forks by default without -n.
+	
+	result := exec.RunWithTimeout("/usr/sbin/keepalived", 5*time.Second, "-f", "/tmp/keepalived.conf", "-D")
 	if !result.Success() {
-		return fmt.Errorf("openwrt reload/restart failed: %s", result.Combined())
+		return fmt.Errorf("failed to start keepalived binary: %s", result.Combined())
 	}
+	
 	return nil
 }
 
 func (p *OpenWrtPlatform) Start() error {
-	result := exec.RunWithTimeout("/etc/init.d/keepalived", 30*time.Second, "start")
-	if !result.Success() {
-		return fmt.Errorf("init.d start failed: %s", result.Combined())
-	}
-	return nil
+	// Same as Reload for now - just ensure it's running
+	return p.Reload()
 }
 
 func (p *OpenWrtPlatform) Stop() error {
-	result := exec.RunWithTimeout("/etc/init.d/keepalived", 30*time.Second, "stop")
-	if !result.Success() {
-		return fmt.Errorf("init.d stop failed: %s", result.Combined())
+	// Stop system service first to be safe
+	exec.RunWithTimeout("/etc/init.d/keepalived", 10*time.Second, "stop")
+	
+	// Kill process
+	result := exec.RunWithTimeout("killall", 5*time.Second, "keepalived")
+	if !result.Success() && result.ExitCode != 1 { // 1 means no process found
+		return fmt.Errorf("killall failed: %s", result.Combined())
 	}
 	return nil
 }
 
 func (p *OpenWrtPlatform) Enable() error {
-	result := exec.RunWithTimeout("/etc/init.d/keepalived", 10*time.Second, "enable")
-	if !result.Success() {
-		return fmt.Errorf("init.d enable failed: %s", result.Combined())
-	}
+	// Disable system service to prevent it from interfering on reboot
+	// Agent should be responsible for starting it
+	exec.RunWithTimeout("/etc/init.d/keepalived", 10*time.Second, "disable")
 	return nil
 }
