@@ -135,12 +135,14 @@ func GetStatus() *Status {
 
 			if vip != "" && iface != "" {
 				// Check if IP exists on interface
-				checkCmd := fmt.Sprintf("ip addr show dev %s | grep 'inet %s/'", iface, vip)
+				// On OpenWrt/BusyBox, grep might behave differently, so we check for exact match or subnet
+				checkCmd := fmt.Sprintf("ip addr show dev %s | grep -F '%s/'", iface, vip)
 				res := exec.RunWithTimeout("sh", 2*time.Second, "-c", checkCmd)
 				if res.Success() {
 					status.VRRPState = "MASTER"
 				} else if status.Running {
 					// If running but no VIP, we are definitely BACKUP (or FAULT)
+					// But only if we are sure service is running
 					status.VRRPState = "BACKUP"
 				}
 			}
