@@ -31,7 +31,7 @@ const (
 	StatusError        RouterStatus = "error"
 
 	// DefaultAgentPath is the standard installation path for the agent on remote routers.
-	DefaultAgentPath = "/usr/bin/gateway-agent"
+	DefaultAgentPath = "/etc/gateway-agent/gateway-agent"
 )
 
 // Platform represents the detected remote platform.
@@ -597,13 +597,11 @@ func (m *Manager) Install(r *Router, agentConfig *config.Config) error {
 		return fmt.Errorf("create config dir: %w", err)
 	}
 	cleanup = append(cleanup, func() { client.RunCombined("rm -rf /etc/gateway-agent") })
-	// Ensure directory permissions for Keepalived security
+	
+	// CRITICAL: Fix ownership and permissions for the entire path to satisfy Keepalived security audits
+	// Some systems (like the user's P-BOX) have non-root ownership on /usr or other paths.
+	// We force root ownership on our own config/bin directory.
 	client.RunCombined("chown root:root /etc/gateway-agent && chmod 0755 /etc/gateway-agent")
-
-	if err := client.MkdirAll("/usr/bin"); err != nil {
-		r.AddLog("!! 创建 /usr/bin 目录失败: " + err.Error())
-		return fmt.Errorf("create bin dir: %w", err)
-	}
 
 	if err := client.WriteFile(DefaultAgentPath, binData, 0755); err != nil {
 		r.AddLog("!! 上传失败: " + err.Error())
