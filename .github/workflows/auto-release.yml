@@ -118,7 +118,7 @@ jobs:
       - name: Build binaries
         run: |
           VERSION=${{ needs.check-version.outputs.new_version }}
-          LDFLAGS="-s -w -X github.com/zczy-k/FloatingGateway/internal/controller.Version=$VERSION"
+          LDFLAGS="-s -w -X github.com/zczy-k/FloatingGateway/internal/version.Version=$VERSION"
           mkdir -p dist
           
           echo "Building version: $VERSION"

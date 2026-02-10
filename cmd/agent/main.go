@@ -17,11 +17,11 @@ import (
 	"github.com/zczy-k/FloatingGateway/internal/keepalived"
 	"github.com/zczy-k/FloatingGateway/internal/platform/detect"
 	"github.com/zczy-k/FloatingGateway/internal/platform/netutil"
+	"github.com/zczy-k/FloatingGateway/internal/version"
 )
 
 const (
 	defaultConfigPath = "/etc/gateway-agent/config.yaml"
-	version           = "1.0.5"
 )
 
 func main() {
@@ -48,7 +48,7 @@ func main() {
 	case "detect-iface":
 		detectIfaceCmd(os.Args[2:])
 	case "version":
-		fmt.Printf("gateway-agent %s\n", version)
+		fmt.Printf("gateway-agent %s\n", version.Version)
 	case "help", "-h", "--help":
 		printUsage()
 	default:
@@ -126,7 +126,7 @@ func runCmd(args []string) {
 		os.Exit(1)
 	}
 
-	fmt.Printf("Starting gateway-agent (role=%s, mode=%s)\n", cfg.Role, cfg.Health.Mode)
+	fmt.Printf("Starting gateway-agent (version=%s, role=%s, mode=%s)\n", version.Version, cfg.Role, cfg.Health.Mode)
 
 	// Create health policy
 	healthPolicy, err := policy.NewPolicy(cfg)
@@ -323,17 +323,17 @@ func statusCmd(args []string) {
 
 	// Gather status information
 	status := struct {
-		Version         string            `json:"version"`
-		Role            string            `json:"role"`
-		Platform        string            `json:"platform"`
-		Interface       string            `json:"interface"`
-		CIDR            string            `json:"cidr"`
-		VIP             string            `json:"vip"`
-		SelfIP          string            `json:"self_ip"`
-		PeerIP          string            `json:"peer_ip"`
-		HealthMode      string            `json:"health_mode"`
-		Keepalived      *keepalived.Status `json:"keepalived"`
-		Health          *policy.Status    `json:"health,omitempty"`
+		Version    string             `json:"version"`
+		Role       string             `json:"role"`
+		Platform   string             `json:"platform"`
+		Interface  string             `json:"interface"`
+		CIDR       string             `json:"cidr"`
+		VIP        string             `json:"vip"`
+		SelfIP     string             `json:"self_ip"`
+		PeerIP     string             `json:"peer_ip"`
+		HealthMode string             `json:"health_mode"`
+		Keepalived *keepalived.Status `json:"keepalived"`
+		Health     *policy.Status     `json:"health,omitempty"`
 	}{
 		Version:    version,
 		Role:       string(cfg.Role),

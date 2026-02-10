@@ -17,7 +17,7 @@ import (
 	"github.com/zczy-k/FloatingGateway/internal/config"
 )
 
-// Server is the HTTP API server for the controller.
+// Server represents the HTTP server for the controller.
 type Server struct {
 	manager   *Manager
 	mux       *http.ServeMux
@@ -481,7 +481,7 @@ func (s *Server) handleDetectNet(w http.ResponseWriter, r *http.Request) {
 		Password string `json:"password"`
 		KeyFile  string `json:"key_file"`
 	}
-	
+
 	// Try to decode request body
 	if r.ContentLength > 0 {
 		if err := json.NewDecoder(r.Body).Decode(&req); err == nil && req.Host != "" {
@@ -489,7 +489,7 @@ func (s *Server) handleDetectNet(w http.ResponseWriter, r *http.Request) {
 			if req.Port == 0 {
 				req.Port = 22
 			}
-			
+
 			client := NewSSHClient(&SSHConfig{
 				Host:     req.Host,
 				Port:     req.Port,
@@ -498,23 +498,23 @@ func (s *Server) handleDetectNet(w http.ResponseWriter, r *http.Request) {
 				KeyFile:  req.KeyFile,
 				Timeout:  30,
 			})
-			
+
 			if err := client.Connect(); err != nil {
 				writeError(w, http.StatusInternalServerError, fmt.Errorf("SSH 连接失败: %w", err))
 				return
 			}
 			defer client.Close()
-			
+
 			// Detect network on remote router
 			iface, cidr, err := s.manager.DetectNetwork(client, req.Host)
 			if err != nil {
 				writeError(w, http.StatusInternalServerError, fmt.Errorf("网络探测失败: %w", err))
 				return
 			}
-			
+
 			// Generate suggested VIP based on CIDR
 			suggestedVIP := s.manager.SuggestVIP(cidr)
-			
+
 			writeJSON(w, http.StatusOK, map[string]string{
 				"iface":         iface,
 				"cidr":          cidr,
@@ -655,9 +655,9 @@ func (s *Server) handleInstallAll(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusAccepted, map[string]interface{}{
-		"status":    "installing",
-		"message":   fmt.Sprintf("已开始安装 %d 台路由器", installed),
-		"count":     installed,
+		"status":  "installing",
+		"message": fmt.Sprintf("已开始安装 %d 台路由器", installed),
+		"count":   installed,
 	})
 }
 
@@ -746,13 +746,8 @@ func (s *Server) handleVersion(w http.ResponseWriter, r *http.Request) {
 
 // getCurrentVersion returns the current version of the controller
 func getCurrentVersion() string {
-	// Try to get version from build info (set via ldflags during build)
-	// Fallback to a default if not set
-	return Version
+	return version.Version
 }
-
-// Version is set via ldflags during build: -ldflags "-X github.com/zczy-k/FloatingGateway/internal/controller.Version=v1.0.0"
-var Version = "dev"
 
 // getLatestReleaseInfo fetches the latest release info from GitHub
 func getLatestReleaseInfo() (version, url, notes string, err error) {
@@ -836,7 +831,6 @@ func compareVersions(v1, v2 string) int {
 
 	return 0
 }
-
 
 // handleUpgrade handles POST /api/upgrade - auto-upgrade controller to latest version
 func (s *Server) handleUpgrade(w http.ResponseWriter, r *http.Request) {
