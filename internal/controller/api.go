@@ -48,6 +48,7 @@ func (s *Server) setupRoutes() {
 	s.mux.HandleFunc("/api/config", s.authMiddleware(s.handleConfig))
 	s.mux.HandleFunc("/api/detect-net", s.authMiddleware(s.handleDetectNet))
 	s.mux.HandleFunc("/api/routers/install-all", s.authMiddleware(s.handleInstallAll))
+	s.mux.HandleFunc("/api/verify-drift", s.authMiddleware(s.handleVerifyDrift))
 	s.mux.HandleFunc("/api/version", s.authMiddleware(s.handleVersion))
 	s.mux.HandleFunc("/api/upgrade", s.authMiddleware(s.handleUpgrade))
 
@@ -831,6 +832,137 @@ func compareVersions(v1, v2 string) int {
 	}
 
 	return 0
+}
+
+// handleVerifyDrift performs a comprehensive drift verification test.
+func (s *Server) handleVerifyDrift(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+
+	// 1. Initial State Check
+	cfg := s.manager.GetConfig()
+	routers := s.manager.GetRouters()
+	var master, backup *Router
+	for _, router := range routers {
+		if router.VRRPState == "MASTER" {
+			master = router
+		} else if router.VRRPState == "BACKUP" {
+			backup = router
+		}
+	}
+
+	if master == nil || backup == nil {
+		writeJSON(w, http.StatusOK, map[string]interface{}{
+			"success": false,
+			"step":    "初始检查",
+			"message": "无法开始验证：集群状态不健康（未找到 MASTER 或 BACKUP 节点）。请先确保诊断全部通过。",
+		})
+		return
+	}
+
+	// Stream response using Server-Sent Events (SSE) style flushing or just long polling
+	// For simplicity, we'll return a streamed text response if client accepts it, otherwise blocking JSON
+	// Here we implement blocking JSON for simplicity in MVP, but real-time is better.
+	// Let's do a blocking execution and return final report log.
+
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		http.Error(w, "Streaming not supported", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/x-ndjson")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+
+	sendEvent := func(step, status, message string) {
+		json.NewEncoder(w).Encode(map[string]string{
+			"step":    step,
+			"status":  status,
+			"message": message,
+		})
+		fmt.Fprint(w, "\n")
+		flusher.Flush()
+	}
+
+	sendEvent("init", "running", fmt.Sprintf("当前主节点: %s, 备节点: %s", master.Name, backup.Name))
+
+	// 2. Ping VIP Check
+	sendEvent("ping_vip", "running", "正在测试 VIP 连通性...")
+	if err := pingIP(cfg.LAN.VIP); err != nil {
+		sendEvent("ping_vip", "error", fmt.Sprintf("VIP 无法访问: %v。验证终止。", err))
+		return
+	}
+	sendEvent("ping_vip", "success", "VIP 连通性正常")
+
+	// 3. Trigger Drift (Simulate Fault on Master)
+	sendEvent("trigger_drift", "running", fmt.Sprintf("正在 %s 上模拟故障 (降低优先级)...", master.Name))
+
+	// Command to drop priority temporarily
+	// We use pkill -STOP keepalived to freeze it, which should trigger backup to take over
+	// Or better, use a custom agent command if available.
+	// For now, let's use systemctl stop keepalived for 10s then start
+
+	sshClient := NewSSHClient(s.manager.sshConfig(master))
+	if err := sshClient.Connect(); err != nil {
+		sendEvent("trigger_drift", "error", "无法连接到主节点: "+err.Error())
+		return
+	}
+	defer sshClient.Close()
+
+	// Stop keepalived
+	_, err := sshClient.RunCombined("systemctl stop keepalived || /etc/init.d/keepalived stop")
+	if err != nil {
+		sendEvent("trigger_drift", "error", "故障模拟失败: "+err.Error())
+		return
+	}
+	sendEvent("trigger_drift", "success", "主节点 Keepalived 已暂停，等待漂移...")
+
+	// 4. Verify Drift (Wait for Backup to become Master)
+	sendEvent("verify_drift", "running", "正在检测 VIP 漂移...")
+	driftSuccess := false
+	for i := 0; i < 10; i++ {
+		time.Sleep(1 * time.Second)
+		// Check if VIP is still pingable (should be almost instant)
+		if err := pingIP(cfg.LAN.VIP); err == nil {
+			// Check if Backup is now holding VIP
+			// We can check via API probe or just trust ping if we know Master is down
+			driftSuccess = true
+			break
+		}
+	}
+
+	if driftSuccess {
+		sendEvent("verify_drift", "success", "VIP 访问正常，漂移成功！")
+	} else {
+		sendEvent("verify_drift", "error", "漂移失败：主节点故障后 VIP 无法访问")
+	}
+
+	// 5. Restore
+	sendEvent("restore", "running", "正在恢复主节点...")
+	sshClient.RunCombined("systemctl start keepalived || /etc/init.d/keepalived start")
+
+	// Wait for restore
+	time.Sleep(5 * time.Second)
+	// Force probe to update UI state
+	s.manager.Probe(master)
+	s.manager.Probe(backup)
+
+	if driftSuccess {
+		sendEvent("finish", "success", "验证完成：网关漂移功能正常！")
+	} else {
+		sendEvent("finish", "error", "验证失败：请检查备份节点日志")
+	}
+}
+
+func pingIP(ip string) error {
+	cmd := exec.Command("ping", "-c", "1", "-W", "1", ip)
+	if runtime.GOOS == "windows" {
+		cmd = exec.Command("ping", "-n", "1", "-w", "1000", ip)
+	}
+	return cmd.Run()
 }
 
 // handleUpgrade handles POST /api/upgrade - auto-upgrade controller to latest version

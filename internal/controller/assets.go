@@ -84,6 +84,10 @@ const indexHTML = `<!DOCTYPE html>
                         <button id="btn-refresh" class="btn btn-icon" title="刷新状态">
                             <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 4v6h-6"/><path d="M1 20v-6h6"/><path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/></svg>
                         </button>
+                        <button id="btn-verify-drift" class="btn btn-ghost" title="验证漂移">
+                            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+                            验证漂移
+                        </button>
                         <button id="btn-show-help" class="btn btn-ghost" title="功能说明">
                             <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 015.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
                             使用说明
@@ -110,6 +114,27 @@ const indexHTML = `<!DOCTYPE html>
                 <div id="logs"></div>
             </section>
         </main>
+
+        <!-- Verify Drift Modal -->
+        <div id="modal-verify-drift" class="modal">
+            <div class="modal-content modal-sm">
+                <div class="modal-header">
+                    <h3>验证网关漂移</h3>
+                    <button type="button" class="modal-close" onclick="closeModal('modal-verify-drift')">&times;</button>
+                </div>
+                <div class="modal-body">
+                    <p style="margin-bottom: 1rem; color: var(--text-secondary);">
+                        系统将模拟主节点故障（暂停 Keepalived），并验证 VIP 是否能自动漂移到备节点且保持网络连通。
+                    </p>
+                    <div id="drift-steps" class="drift-steps">
+                        <!-- Steps will be inserted here -->
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-primary" id="btn-start-verify">开始验证</button>
+                </div>
+            </div>
+        </div>
 
         <!-- Help Modal -->
         <div id="modal-help" class="modal">
@@ -1095,6 +1120,74 @@ select {
     background-position: right 0.75rem center;
     padding-right: 2rem;
 }
+
+/* Drift Verification Styles */
+.drift-steps {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+}
+
+.drift-step {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 0.75rem;
+    border-radius: var(--radius);
+    background: var(--bg-input);
+    border: 1px solid var(--border);
+    transition: all 0.3s ease;
+}
+
+.drift-step.running {
+    border-color: var(--primary);
+    background: rgba(59, 130, 246, 0.1);
+}
+
+.drift-step.success {
+    border-color: var(--success);
+    background: rgba(16, 185, 129, 0.1);
+}
+
+.drift-step.error {
+    border-color: var(--danger);
+    background: rgba(239, 68, 68, 0.1);
+}
+
+.step-icon {
+    width: 24px;
+    height: 24px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.step-content {
+    flex: 1;
+}
+
+.step-title {
+    font-weight: 600;
+    font-size: 0.9rem;
+    margin-bottom: 0.2rem;
+}
+
+.step-desc {
+    font-size: 0.8rem;
+    color: var(--text-secondary);
+}
+
+/* Spinner for running state */
+.spinner {
+    width: 16px;
+    height: 16px;
+    border: 2px solid var(--primary);
+    border-top-color: transparent;
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+}
+
+@keyframes spin { to { transform: rotate(360deg); } }
 
 /* Doctor report */
 .doctor-item {
@@ -2237,6 +2330,101 @@ document.addEventListener('DOMContentLoaded', () => {
             log('获取配置失败: ' + e.message, 'error');
         }
     });
+
+    // Verify Drift button
+    $('#btn-verify-drift').addEventListener('click', () => {
+        const stepsContainer = $('#drift-steps');
+        stepsContainer.innerHTML = ''; // Clear previous
+        
+        // Add initial steps placeholders
+        const steps = [
+            {id: 'init', title: '环境检查'},
+            {id: 'ping_vip', title: '初始连通性测试'},
+            {id: 'trigger_drift', title: '模拟故障 (暂停主节点)'},
+            {id: 'verify_drift', title: '验证漂移 (VIP 切换)'},
+            {id: 'restore', title: '恢复环境'},
+            {id: 'finish', title: '最终结果'}
+        ];
+        
+        steps.forEach(step => {
+            const div = document.createElement('div');
+            div.className = 'drift-step';
+            div.id = 'step-' + step.id;
+            div.innerHTML = `
+                <div class="step-icon">
+                    <div class="step-dot" style="width: 8px; height: 8px; background: var(--text-secondary); border-radius: 50%;"></div>
+                </div>
+                <div class="step-content">
+                    <div class="step-title">${step.title}</div>
+                    <div class="step-desc">等待开始...</div>
+                </div>
+            `;
+            stepsContainer.appendChild(div);
+        });
+        
+        $('#btn-start-verify').disabled = false;
+        $('#btn-start-verify').textContent = '开始验证';
+        openModal('modal-verify-drift');
+    });
+
+    $('#btn-start-verify').addEventListener('click', async () => {
+        const btn = $('#btn-start-verify');
+        btn.disabled = true;
+        btn.textContent = '验证进行中...';
+        
+        try {
+            const response = await fetch('/api/verify-drift', {
+                method: 'POST',
+                headers: { 'Authorization': 'Bearer ' + token }
+            });
+            
+            const reader = response.body.getReader();
+            const decoder = new TextDecoder();
+            
+            while (true) {
+                const { done, value } = await reader.read();
+                if (done) break;
+                
+                const text = decoder.decode(value);
+                const lines = text.split('\n');
+                
+                for (const line of lines) {
+                    if (!line.trim()) continue;
+                    try {
+                        const event = JSON.parse(line);
+                        updateDriftStep(event);
+                    } catch (e) {
+                        console.error('Failed to parse event:', line);
+                    }
+                }
+            }
+        } catch (error) {
+            log('验证请求失败: ' + error.message, 'error');
+            updateDriftStep({step: 'finish', status: 'error', message: '网络请求失败'});
+        }
+        
+        btn.textContent = '验证完成';
+        btn.disabled = false;
+    });
+
+    function updateDriftStep(event) {
+        const el = $('#step-' + event.step);
+        if (!el) return;
+        
+        el.className = 'drift-step ' + event.status;
+        const icon = el.querySelector('.step-icon');
+        const desc = el.querySelector('.step-desc');
+        
+        desc.textContent = event.message;
+        
+        if (event.status === 'running') {
+            icon.innerHTML = '<div class="spinner"></div>';
+        } else if (event.status === 'success') {
+            icon.innerHTML = '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="var(--success)" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>';
+        } else if (event.status === 'error') {
+            icon.innerHTML = '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="var(--danger)" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>';
+        }
+    }
 
     // Help button
     $('#btn-show-help').addEventListener('click', () => {
