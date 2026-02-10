@@ -155,9 +155,32 @@ func GetDefaultExecutor() Executor {
 	return defaultExecutor
 }
 
-// Run executes a command using the global executor.
-func Run(ctx context.Context, name string, args ...string) *Result {
-	return defaultExecutor.Run(ctx, name, args...)
+// RunStdout executes a command and returns its stdout as string.
+func RunStdout(name string, args ...string) (string, error) {
+	// Split name if it contains spaces (for simple cases like "ls -la")
+	// But respect if it's a single path
+	var cmdName string
+	var cmdArgs []string
+	
+	if strings.Contains(name, " ") && len(args) == 0 {
+		parts := strings.Fields(name)
+		cmdName = parts[0]
+		cmdArgs = parts[1:]
+	} else {
+		cmdName = name
+		cmdArgs = args
+	}
+
+	result := defaultExecutor.RunWithTimeout(cmdName, DefaultTimeout, cmdArgs...)
+	if !result.Success() {
+		return "", fmt.Errorf("command failed: %s (exit code %d): %s", cmdName, result.ExitCode, result.Combined())
+	}
+	return strings.TrimSpace(result.Stdout), nil
+}
+
+// Run executes a command with the given context.
+func Run(name string, args ...string) *Result {
+	return defaultExecutor.RunWithTimeout(name, DefaultTimeout, args...)
 }
 
 // RunWithTimeout executes a command with timeout using the global executor.

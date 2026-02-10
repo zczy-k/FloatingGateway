@@ -422,14 +422,14 @@ func (d *Doctor) checkVRRPMulticast() CheckResult {
 			result.CanFix = true
 			if d.autoFix {
 				// Fix it via uci
-				exec.Run("uci delete firewall.vrrp")
-				exec.Run("uci set firewall.vrrp=rule")
-				exec.Run("uci set firewall.vrrp.name='Allow-VRRP'")
-				exec.Run("uci set firewall.vrrp.src='lan'")
-				exec.Run("uci set firewall.vrrp.proto='112'")
-				exec.Run("uci set firewall.vrrp.target='ACCEPT'")
-				exec.Run("uci commit firewall")
-				exec.Run("/etc/init.d/firewall reload")
+				exec.RunWithTimeout("uci", 5*time.Second, "delete", "firewall.vrrp")
+				exec.RunWithTimeout("uci", 5*time.Second, "set", "firewall.vrrp=rule")
+				exec.RunWithTimeout("uci", 5*time.Second, "set", "firewall.vrrp.name=Allow-VRRP")
+				exec.RunWithTimeout("uci", 5*time.Second, "set", "firewall.vrrp.src=lan")
+				exec.RunWithTimeout("uci", 5*time.Second, "set", "firewall.vrrp.proto=112")
+				exec.RunWithTimeout("uci", 5*time.Second, "set", "firewall.vrrp.target=ACCEPT")
+				exec.RunWithTimeout("uci", 5*time.Second, "commit", "firewall")
+				exec.RunWithTimeout("/etc/init.d/firewall", 5*time.Second, "reload")
 				result.Fixed = true
 				result.Status = "ok"
 				result.Message = "已自动添加防火墙规则放行 VRRP"
