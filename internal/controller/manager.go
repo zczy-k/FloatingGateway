@@ -573,20 +573,27 @@ func (m *Manager) Install(r *Router, agentConfig *config.Config) error {
 	goos := "linux"
 	r.AddLog(fmt.Sprintf("   架构: %s (目标: %s/%s)", arch, goos, goarch))
 
+	// Check for controller updates to remind user
+	if latest, _, _, err := getLatestReleaseInfo(); err == nil {
+		if compareVersions(version.Version, latest) < 0 {
+			r.AddLog(fmt.Sprintf("   [提示] 检测到新版本 %s，建议先更新控制端 (当前 %s) 以获取最新 Agent", latest, version.Version))
+		}
+	}
+
 	// Try to find agent binary locally first
 	r.StepLog("查找适配的 Agent 二进制文件...")
 	binPath, err := m.findAgentBinary(goos, goarch)
-	if err != nil {
+	if err == nil {
+		r.AddLog("   使用本地文件: " + filepath.Base(binPath))
+	} else {
 		// Not found locally, download from remote
-		r.AddLog("   本地未找到，从远程仓库下载...")
-		r.StepLog("从远程仓库下载 Agent 二进制文件...")
+		r.AddLog("   本地未找到匹配版本，准备从远程下载...")
+		r.StepLog("从远程下载 Agent (" + version.Version + ")...")
 		binPath, err = m.downloadAgentBinary(r, goos, goarch)
 		if err != nil {
 			r.AddLog("!! 下载失败: " + err.Error())
 			return fmt.Errorf("download binary: %w", err)
 		}
-	} else {
-		r.AddLog("   使用本地文件: " + binPath)
 	}
 
 	// Read and upload binary
@@ -967,7 +974,29 @@ func (m *Manager) findAgentBinary(goos, goarch string) (string, error) {
 		for _, pattern := range patterns {
 			path := filepath.Join(dir, pattern)
 			if info, err := os.Stat(path); err == nil && info.Size() > 0 {
-				return path, nil
+				// If it's a versioned filename in our cache, trust it
+				if strings.Contains(pattern, version.Version) && strings.Contains(dir, "agents") {
+					return path, nil
+				}
+
+				// Otherwise, verify version if it's a gateway-agent binary
+				// This prevents using an old v0.0.4 binary renamed to v0.0.7 or generic gateway-agent
+				cmd := exec.Command(path, "version")
+				if out, err := cmd.Output(); err == nil {
+					verStr := strings.TrimSpace(string(out))
+					if strings.Contains(verStr, version.Version) || version.Version == "dev" {
+						return path, nil
+					}
+					// If version mismatch, don't use it, keep searching or download
+					continue
+				} else {
+					// If we can't run it (e.g. exec format error for different architecture),
+					// but it's in our cache with the correct versioned name, trust it.
+					// If it's NOT a versioned name (e.g. just "gateway-agent"), we can't trust it.
+					if strings.Contains(pattern, version.Version) && strings.Contains(dir, "agents") {
+						return path, nil
+					}
+				}
 			}
 		}
 	}
