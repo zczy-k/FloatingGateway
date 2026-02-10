@@ -403,7 +403,18 @@ func notifyCmd(args []string) {
 
 	// Persist state for status reporting
 	stateFile := "/tmp/keepalived.GATEWAY.state"
-	_ = os.WriteFile(stateFile, []byte(state), 0644)
+	// Ensure file exists and is writable by everyone (so keepalived user can write to it if needed)
+	if _, err := os.Stat(stateFile); os.IsNotExist(err) {
+		os.WriteFile(stateFile, []byte("UNKNOWN"), 0666)
+		os.Chmod(stateFile, 0666)
+	}
+	// Write state
+	err := os.WriteFile(stateFile, []byte(state), 0666)
+	if err != nil {
+		// Try to force permission fix and retry
+		os.Chmod(stateFile, 0666)
+		_ = os.WriteFile(stateFile, []byte(state), 0666)
+	}
 
 	iface := "eth0"
 	vip := ""

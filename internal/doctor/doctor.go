@@ -330,6 +330,23 @@ func (d *Doctor) checkKeepalived() CheckResult {
 	if _, err := os.Stat(stateFile); os.IsNotExist(err) {
 		result.Status = "warning"
 		result.Message = "keepalived 正在运行，但未生成状态文件 (notify 脚本可能执行失败)"
+		
+		// Try to run notify manually to see if it works and check for permission errors
+		// This simulates what keepalived does
+		agentBin := keepalived.FindAgentBinary()
+		testCmd := fmt.Sprintf("%s notify TEST_PERMISSION", agentBin)
+		if out, err := exec.RunStdout(testCmd); err != nil {
+			result.Message += fmt.Sprintf("。手动执行 notify 失败: %v", err)
+		} else {
+			// Check if file created now
+			if _, err := os.Stat(stateFile); err == nil {
+				result.Message += "。手动执行成功（文件已创建），可能是 Keepalived 进程权限不足"
+				// Auto-fix permission
+				exec.RunStdout("chmod 666 " + stateFile)
+			} else {
+				result.Message += fmt.Sprintf("。手动执行成功但文件未创建。输出: %s", out)
+			}
+		}
 	} else {
 		content, _ := os.ReadFile(stateFile)
 		state := strings.TrimSpace(string(content))

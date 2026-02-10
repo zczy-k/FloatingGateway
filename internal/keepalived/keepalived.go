@@ -84,9 +84,9 @@ vrrp_instance GATEWAY {
         chk_gateway
     }
 
-    notify_master "/bin/sh -c 'PATH=/usr/bin:/usr/local/bin:/bin:/sbin:$PATH {{ .AgentBinary }} notify MASTER'"
-    notify_backup "/bin/sh -c 'PATH=/usr/bin:/usr/local/bin:/bin:/sbin:$PATH {{ .AgentBinary }} notify BACKUP'"
-    notify_fault  "/bin/sh -c 'PATH=/usr/bin:/usr/local/bin:/bin:/sbin:$PATH {{ .AgentBinary }} notify FAULT'"
+    notify_master "{{ .AgentBinary }} notify MASTER"
+    notify_backup "{{ .AgentBinary }} notify BACKUP"
+    notify_fault  "{{ .AgentBinary }} notify FAULT"
 }
 `
 
