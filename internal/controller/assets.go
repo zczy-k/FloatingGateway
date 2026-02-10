@@ -2350,15 +2350,13 @@ document.addEventListener('DOMContentLoaded', () => {
             const div = document.createElement('div');
             div.className = 'drift-step';
             div.id = 'step-' + step.id;
-            div.innerHTML = ` + "`" + `
-                <div class="step-icon">
-                    <div class="step-dot" style="width: 8px; height: 8px; background: var(--text-secondary); border-radius: 50%;"></div>
-                </div>
-                <div class="step-content">
-                    <div class="step-title">${"${step.title}"}</div>
-                    <div class="step-desc">等待开始...</div>
-                </div>
-            ` + "`" + `;
+            div.innerHTML = '<div class="step-icon">' +
+                '<div class="step-dot" style="width: 8px; height: 8px; background: var(--text-secondary); border-radius: 50%;"></div>' +
+                '</div>' +
+                '<div class="step-content">' +
+                '<div class="step-title">' + step.title + '</div>' +
+                '<div class="step-desc">等待开始...</div>' +
+                '</div>';
             stepsContainer.appendChild(div);
         });
         
@@ -2380,13 +2378,17 @@ document.addEventListener('DOMContentLoaded', () => {
             
             const reader = response.body.getReader();
             const decoder = new TextDecoder();
+            let buffer = '';
             
             while (true) {
                 const { done, value } = await reader.read();
                 if (done) break;
                 
-                const text = decoder.decode(value);
-                const lines = text.split('\n');
+                buffer += decoder.decode(value, {stream: true});
+                const lines = buffer.split('\n');
+                
+                // Keep the last partial line in buffer
+                buffer = lines.pop();
                 
                 for (const line of lines) {
                     if (!line.trim()) continue;
@@ -2398,9 +2400,20 @@ document.addEventListener('DOMContentLoaded', () => {
                     }
                 }
             }
+            
+            // Process any remaining buffer
+            if (buffer.trim()) {
+                try {
+                    const event = JSON.parse(buffer);
+                    updateDriftStep(event);
+                } catch (e) {
+                    console.error('Failed to parse remaining buffer:', buffer);
+                }
+            }
+            
         } catch (error) {
             log('验证请求失败: ' + error.message, 'error');
-            updateDriftStep({step: 'finish', status: 'error', message: '网络请求失败'});
+            updateDriftStep({step: 'finish', status: 'error', message: '网络请求失败: ' + error.message});
         }
         
         btn.textContent = '验证完成';
