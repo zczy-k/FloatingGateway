@@ -100,10 +100,11 @@ func GetStatus() *Status {
 
 	// Try to get VRRP state
 	// 1. Check state file (updated by notify scripts)
+	// Only trust if not UNKNOWN (as we initialize it to UNKNOWN)
 	result := exec.RunWithTimeout("cat", 2*time.Second, "/tmp/keepalived.GATEWAY.state")
 	if result.Success() {
 		state := strings.TrimSpace(result.Stdout)
-		if state != "" {
+		if state != "" && state != "UNKNOWN" {
 			status.VRRPState = state
 		}
 	}
