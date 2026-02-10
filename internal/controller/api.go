@@ -976,9 +976,16 @@ func (s *Server) handleVerifyDrift(w http.ResponseWriter, r *http.Request) {
 			} else {
 				// Check for unicast config
 				isUnicast := false
+				// Check standard path first
 				_, _, err := sshBackup.Run("grep 'unicast_peer' /etc/keepalived/keepalived.conf")
 				if err == nil {
 					isUnicast = true
+				} else {
+					// Check OpenWrt path fallback
+					_, _, err = sshBackup.Run("grep 'unicast_peer' /tmp/keepalived.conf")
+					if err == nil {
+						isUnicast = true
+					}
 				}
 
 				if isUnicast {
