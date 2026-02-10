@@ -417,14 +417,22 @@ func notifyCmd(args []string) {
 		fmt.Printf("Transitioning to MASTER state\n")
 		// Send multiple GARPs to ensure ARP cache update
 		if vip != "" {
-			for i := 0; i < 3; i++ {
-				if err := netutil.SendGARP(vip, iface); err != nil {
-					fmt.Fprintf(os.Stderr, "Warning: GARP failed: %v\n", err)
-				} else {
-					fmt.Printf("Sent GARP for %s on %s\n", vip, iface)
-				}
-				time.Sleep(1 * time.Second)
+			// Send initial GARP immediately
+			if err := netutil.SendGARP(vip, iface); err != nil {
+				fmt.Fprintf(os.Stderr, "Warning: GARP failed: %v\n", err)
+			} else {
+				fmt.Printf("Sent GARP for %s on %s\n", vip, iface)
 			}
+
+			// Send follow-up GARPs asynchronously
+			go func() {
+				for i := 0; i < 3; i++ {
+					time.Sleep(1 * time.Second)
+					if err := netutil.SendGARP(vip, iface); err != nil {
+						fmt.Fprintf(os.Stderr, "Warning: Follow-up GARP failed: %v\n", err)
+					}
+				}
+			}()
 		}
 
 	case "BACKUP":

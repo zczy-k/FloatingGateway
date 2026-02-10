@@ -332,6 +332,7 @@ func GetStatus() *Status {
 				if res.Success() {
 					status.VRRPState = "MASTER"
 				} else if status.Running {
+					// If running but no VIP, we are definitely BACKUP (or FAULT)
 					status.VRRPState = "BACKUP"
 				}
 			}
