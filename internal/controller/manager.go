@@ -1220,7 +1220,7 @@ WantedBy=multi-user.target
 func (m *Manager) Uninstall(r *Router) error {
 	r.InstallLog = nil
 	r.InstallStep = 0
-	r.InstallTotal = 7
+	r.InstallTotal = 9
 	r.Error = ""
 	r.Status = StatusUninstalling
 
@@ -1253,6 +1253,25 @@ func (m *Manager) Uninstall(r *Router) error {
 	}
 	r.AddLog("   Agent 服务已停止并移除")
 
+	// Cleanup Firewall Rules
+	r.StepLog("清理防火墙规则...")
+	switch platform {
+	case PlatformOpenWrt:
+		client.RunCombined("uci delete firewall.vrrp 2>/dev/null")
+		client.RunCombined("uci commit firewall")
+		client.RunCombined("/etc/init.d/firewall restart 2>/dev/null")
+	case PlatformLinux:
+		if _, err := client.RunCombined("which ufw"); err == nil {
+			client.RunCombined("ufw delete allow proto vrrp 2>/dev/null")
+		}
+		if _, err := client.RunCombined("which firewall-cmd"); err == nil {
+			client.RunCombined("firewall-cmd --permanent --remove-rich-rule='rule protocol value=\"vrrp\" accept' 2>/dev/null")
+			client.RunCombined("firewall-cmd --reload 2>/dev/null")
+		}
+		client.RunCombined("iptables -D INPUT -p vrrp -j ACCEPT 2>/dev/null")
+	}
+	r.AddLog("   防火墙规则已清理")
+
 	// Stop and disable keepalived service
 	r.StepLog("停止并禁用 Keepalived 服务...")
 	switch platform {
@@ -1283,6 +1302,7 @@ func (m *Manager) Uninstall(r *Router) error {
 
 	// Remove agent files and configuration
 	r.StepLog("清理 Agent 文件和配置...")
+	client.RemoveFile(DefaultAgentPath)
 	client.RemoveFile("/usr/bin/gateway-agent")
 	client.RemoveFile("/usr/local/bin/gateway-agent")
 	client.RunCombined("rm -rf /etc/gateway-agent")
