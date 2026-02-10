@@ -32,16 +32,26 @@ func (p *LinuxPlatform) FindConfigPath() string {
 }
 
 func (p *LinuxPlatform) Reload() error {
+	// Try reload first
 	result := exec.RunWithTimeout("systemctl", 10*time.Second, "reload", "keepalived")
 	if result.Success() {
 		return nil
 	}
-	// Fallback to kill -HUP
+	
+	// If reload failed, check if service is running. If not, start it.
+	// Or simply try restart which handles both cases
+	result = exec.RunWithTimeout("systemctl", 30*time.Second, "restart", "keepalived")
+	if result.Success() {
+		return nil
+	}
+	
+	// Last resort: try manual signal
 	result = exec.RunWithTimeout("killall", 5*time.Second, "-HUP", "keepalived")
 	if result.Success() {
 		return nil
 	}
-	return fmt.Errorf("linux reload failed")
+	
+	return fmt.Errorf("linux reload/restart failed: %s", result.Combined())
 }
 
 func (p *LinuxPlatform) Start() error {
