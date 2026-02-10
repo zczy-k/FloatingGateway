@@ -1910,7 +1910,8 @@ async function showDoctor(name) {
     openModal('modal-doctor');
     
     try {
-        const report = await apiCall('/routers/' + name + '/doctor');
+        // Use a timestamp to force fresh report and avoid cache
+        const report = await apiCall('/routers/' + name + '/doctor?t=' + Date.now());
         
         // Check name translations
         const checkNames = {
