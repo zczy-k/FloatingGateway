@@ -943,14 +943,17 @@ func (m *Manager) findAgentBinary(goos, goarch string) (string, error) {
 // It tries acceleration proxies first (for China users), then falls back to direct download.
 // Returns the path to the downloaded binary.
 func (m *Manager) downloadAgentBinary(r *Router, goos, goarch string) (string, error) {
-	// Include version in binary name to avoid caching old versions
-	binaryName := fmt.Sprintf("gateway-agent-%s-%s-%s", goos, goarch, version.Version)
+	// Remote asset name (as uploaded to GitHub Release)
+	remoteAssetName := fmt.Sprintf("gateway-agent-%s-%s", goos, goarch)
+	// Local cache name (includes version to ensure matching versions)
+	localCacheName := fmt.Sprintf("%s-%s", remoteAssetName, version.Version)
+	
 	cacheDir := m.agentCacheDir()
-	destPath := filepath.Join(cacheDir, binaryName)
+	destPath := filepath.Join(cacheDir, localCacheName)
 
 	// Check if already cached (without lock first for speed)
 	if info, err := os.Stat(destPath); err == nil && info.Size() > 0 {
-		r.AddLog("   使用缓存: " + binaryName)
+		r.AddLog("   使用缓存: " + localCacheName)
 		return destPath, nil
 	}
 
@@ -968,35 +971,46 @@ func (m *Manager) downloadAgentBinary(r *Router, goos, goarch string) (string, e
 	}
 
 	// Build download URL
-	base := m.config.DownloadBase
-	if base == "" {
-		base = defaultDownloadBase
+	// Try versioned release first, then fall back to latest
+	var downloadBases []string
+	if m.config.DownloadBase != "" {
+		downloadBases = append(downloadBases, m.config.DownloadBase)
+	} else {
+		// Priority 1: Specific version
+		if version.Version != "" && version.Version != "dev" {
+			v := version.Version
+			if !strings.HasPrefix(v, "v") {
+				v = "v" + v
+			}
+			downloadBases = append(downloadBases, fmt.Sprintf("https://github.com/zczy-k/FloatingGateway/releases/download/%s", v))
+		}
+		// Priority 2: Latest release
+		downloadBases = append(downloadBases, defaultDownloadBase)
 	}
-	directURL := base + "/" + binaryName
 
 	// Build candidate URLs: user-configured proxy, then built-in proxies, then direct
 	var urls []string
 
-	if m.config.GHProxy != "" {
-		// User-configured proxy
-		proxy := m.config.GHProxy
-		if !strings.HasSuffix(proxy, "/") {
-			proxy += "/"
-		}
-		// Some proxies expect the full URL with protocol, others just the domain
-		urls = append(urls, proxy+directURL)
-	}
+	for _, base := range downloadBases {
+		directURL := base + "/" + remoteAssetName
 
-	// Built-in acceleration proxies
-	for _, proxy := range ghProxies {
-		if !strings.HasSuffix(proxy, "/") {
-			proxy += "/"
+		if m.config.GHProxy != "" {
+			proxy := m.config.GHProxy
+			if !strings.HasSuffix(proxy, "/") {
+				proxy += "/"
+			}
+			urls = append(urls, proxy+directURL)
 		}
-		urls = append(urls, proxy+directURL)
-	}
 
-	// Direct download as last resort
-	urls = append(urls, directURL)
+		for _, proxy := range ghProxies {
+			if !strings.HasSuffix(proxy, "/") {
+				proxy += "/"
+			}
+			urls = append(urls, proxy+directURL)
+		}
+
+		urls = append(urls, directURL)
+	}
 
 	client := &http.Client{
 		Timeout: 180 * time.Second,
@@ -1042,7 +1056,7 @@ func (m *Manager) downloadAgentBinary(r *Router, goos, goarch string) (string, e
 		}
 
 		// Create a truly unique temp file to avoid concurrent install conflicts
-		f, err := os.CreateTemp(cacheDir, binaryName+".*.tmp")
+		f, err := os.CreateTemp(cacheDir, localCacheName+".*.tmp")
 		if err != nil {
 			resp.Body.Close()
 			return "", fmt.Errorf("创建临时文件失败: %w", err)
@@ -1083,7 +1097,7 @@ func (m *Manager) downloadAgentBinary(r *Router, goos, goarch string) (string, e
 		return destPath, nil
 	}
 
-	return "", fmt.Errorf("所有下载源均失败，请检查网络连接或手动将 %s 放到 %s 目录", binaryName, cacheDir)
+	return "", fmt.Errorf("所有下载源均失败，请检查网络连接或手动将 %s 放到 %s 目录", localCacheName, cacheDir)
 }
 
 // copyFile copies a file from src to dst
