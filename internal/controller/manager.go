@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/zczy-k/FloatingGateway/internal/config"
+	"github.com/zczy-k/FloatingGateway/internal/version"
 	"gopkg.in/yaml.v3"
 )
 
@@ -884,6 +885,7 @@ func (m *Manager) findAgentBinary(goos, goarch string) (string, error) {
 
 	// 2. Look for platform-specific binary
 	patterns := []string{
+		fmt.Sprintf("gateway-agent-%s-%s-%s", goos, goarch, version.Version),
 		fmt.Sprintf("gateway-agent-%s-%s", goos, goarch),
 		fmt.Sprintf("gateway-agent_%s_%s", goos, goarch),
 		"gateway-agent",
@@ -924,13 +926,14 @@ func (m *Manager) findAgentBinary(goos, goarch string) (string, error) {
 // It tries acceleration proxies first (for China users), then falls back to direct download.
 // Returns the path to the downloaded binary.
 func (m *Manager) downloadAgentBinary(r *Router, goos, goarch string) (string, error) {
-	binaryName := fmt.Sprintf("gateway-agent-%s-%s", goos, goarch)
+	// Include version in binary name to avoid caching old versions
+	binaryName := fmt.Sprintf("gateway-agent-%s-%s-%s", goos, goarch, version.Version)
 	cacheDir := m.agentCacheDir()
 	destPath := filepath.Join(cacheDir, binaryName)
 
 	// Check if already cached (without lock first for speed)
 	if info, err := os.Stat(destPath); err == nil && info.Size() > 0 {
-		r.AddLog("   已有缓存: " + destPath)
+		r.AddLog("   使用缓存: " + binaryName)
 		return destPath, nil
 	}
 

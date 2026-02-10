@@ -1875,7 +1875,8 @@ function renderRouters() {
                 '<button class="btn btn-sm" onclick="probeRouter(\'' + router.name + '\')">探测</button>' +
                 (router.agent_version 
                     ? '<button class="btn btn-sm" onclick="showDoctor(\'' + router.name + '\')">诊断</button>' +
-                      '<button class="btn btn-sm btn-danger" onclick="uninstallRouter(\'' + router.name + '\')" ' + (statusClass === 'uninstalling' ? 'disabled' : '') + '>卸载 Agent</button>'
+                      '<button class="btn btn-sm btn-primary" onclick="installRouter(\'' + router.name + '\', true)" ' + (statusClass === 'installing' ? 'disabled' : '') + '>重装/升级</button>' +
+                      '<button class="btn btn-sm btn-danger" onclick="uninstallRouter(\'' + router.name + '\')" ' + (statusClass === 'uninstalling' ? 'disabled' : '') + '>卸载</button>'
                     : '<button class="btn btn-sm btn-primary" onclick="installRouter(\'' + router.name + '\')" ' + (statusClass === 'installing' ? 'disabled' : '') + '>安装 Agent</button>') +
                 '<button class="btn btn-sm btn-danger" onclick="deleteRouter(\'' + router.name + '\')">删除</button>' +
             '</div>';
@@ -1964,18 +1965,19 @@ async function probeRouter(name) {
     }
 }
 
-async function installRouter(name) {
-    if (!confirm('确定要在 ' + name + ' 上安装 gateway-agent 吗？')) return;
+async function installRouter(name, isUpgrade = false) {
+    const actionText = isUpgrade ? '重装/升级' : '安装';
+    if (!confirm('确定要在 ' + name + ' 上' + actionText + ' gateway-agent 吗？')) return;
     
-    log('正在 ' + name + ' 上安装 Agent...');
+    log('正在 ' + name + ' 上' + actionText + ' Agent...');
     try {
         await apiCall('/routers/' + name + '/install', { method: 'POST' });
-        log('已开始安装: ' + name, 'success');
+        log('已开始' + actionText + ': ' + name, 'success');
         // Immediate refresh and trigger fast polling
         if (refreshTimer) clearTimeout(refreshTimer);
         refreshStatus();
     } catch (e) {
-        log('安装失败: ' + e.message, 'error');
+        log(actionText + '失败: ' + e.message, 'error');
     }
 }
 
