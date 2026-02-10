@@ -590,7 +590,18 @@ func (m *Manager) Install(r *Router, agentConfig *config.Config) error {
 	}
 
 	// Read and upload binary
-	r.StepLog("上传 Agent 到目标设备 (可能需要等待)...")
+	r.StepLog("停止旧版本 Agent 并上传新版本...")
+	// Stop existing services to avoid "text file busy" errors during upload
+	switch platform {
+	case PlatformOpenWrt:
+		client.RunCombined("/etc/init.d/gateway-agent stop 2>/dev/null")
+	case PlatformLinux:
+		client.RunCombined("systemctl stop gateway-agent 2>/dev/null")
+	}
+	// Kill any stray agent processes
+	client.RunCombined("pkill -9 gateway-agent || (ps -w | grep gateway-agent | grep -v grep | awk '{print $1}' | xargs kill -9) 2>/dev/null")
+	time.Sleep(500 * time.Millisecond)
+
 	binData, err := os.ReadFile(binPath)
 	if err != nil {
 		r.AddLog("!! 读取二进制文件失败: " + err.Error())
@@ -622,6 +633,10 @@ func (m *Manager) Install(r *Router, agentConfig *config.Config) error {
 
 	if err := client.WriteFile(DefaultAgentPath, binData, 0755); err != nil {
 		r.AddLog("!! 上传失败: " + err.Error())
+		// Try to diagnose why it failed
+		if diagOut, _ := client.RunCombined(fmt.Sprintf("ls -ld %s && mount | grep ' / '", agentDir)); diagOut != "" {
+			r.AddLog("   调试信息: " + diagOut)
+		}
 		return fmt.Errorf("upload binary: %w", err)
 	}
 	cleanup = append(cleanup, func() { client.RemoveFile(DefaultAgentPath) })
