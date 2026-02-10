@@ -2371,9 +2371,13 @@ document.addEventListener('DOMContentLoaded', () => {
         btn.textContent = '验证进行中...';
         
         try {
+            // Get current token from localStorage or cookie if variable 'token' is not defined in this scope
+            // Assuming 'token' is a global variable defined earlier in the script, but if not:
+            const authToken = typeof token !== 'undefined' ? token : localStorage.getItem('token');
+            
             const response = await fetch('/api/verify-drift', {
                 method: 'POST',
-                headers: { 'Authorization': 'Bearer ' + token }
+                headers: { 'Authorization': 'Bearer ' + authToken }
             });
             
             const reader = response.body.getReader();
