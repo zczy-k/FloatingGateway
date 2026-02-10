@@ -597,6 +597,8 @@ func (m *Manager) Install(r *Router, agentConfig *config.Config) error {
 		return fmt.Errorf("create config dir: %w", err)
 	}
 	cleanup = append(cleanup, func() { client.RunCombined("rm -rf /etc/gateway-agent") })
+	// Ensure directory permissions for Keepalived security
+	client.RunCombined("chown root:root /etc/gateway-agent && chmod 0755 /etc/gateway-agent")
 
 	if err := client.MkdirAll("/usr/bin"); err != nil {
 		r.AddLog("!! 创建 /usr/bin 目录失败: " + err.Error())

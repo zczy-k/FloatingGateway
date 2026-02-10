@@ -23,6 +23,7 @@ const indexHTML = `<!DOCTYPE html>
             <div class="header-left">
                 <svg class="logo-icon" viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>
                 <h1>Floating Gateway</h1>
+                <span id="controller-version" class="version-tag">v-</span>
             </div>
             <div id="vip-status">
                 <div class="status-chip">
@@ -341,6 +342,18 @@ header h1 {
     letter-spacing: -0.01em;
 }
 
+.version-tag {
+    font-size: 0.7rem;
+    font-family: 'SF Mono', 'Cascadia Code', 'Consolas', monospace;
+    color: var(--text-muted);
+    background: var(--bg-card);
+    padding: 0.1rem 0.4rem;
+    border-radius: 4px;
+    margin-left: 0.2rem;
+    align-self: flex-end;
+    margin-bottom: 0.2rem;
+}
+
 #vip-status {
     display: flex;
     gap: 0.75rem;
@@ -596,6 +609,11 @@ section {
     color: var(--text-secondary);
     font-family: 'SF Mono', 'Cascadia Code', 'Consolas', monospace;
     font-size: 0.8rem;
+}
+
+.router-info .value.outdated {
+    color: var(--warning);
+    font-weight: 600;
 }
 
 .vrrp-state {
@@ -1694,15 +1712,19 @@ async function apiCall(endpoint, options = {}) {
 // Status update
 let refreshTimer = null;
 let previousRouterStates = {}; // Track previous states to detect changes
+let controllerVersion = 'dev';
 
 async function refreshStatus() {
     try {
-        const [status, cfg] = await Promise.all([
+        const [status, cfg, versionInfo] = await Promise.all([
             apiCall('/status'),
-            apiCall('/config')
+            apiCall('/config'),
+            apiCall('/version').catch(() => ({ current_version: 'dev' }))
         ]);
         
         globalConfig = cfg;
+        controllerVersion = versionInfo.current_version;
+        $('#controller-version').textContent = controllerVersion;
         
         $('#vip-address').textContent = status.vip || '-';
         $('#current-master').textContent = status.current_master || '无';
@@ -1792,6 +1814,11 @@ function renderRouters() {
         };
         const statusText = statusTextMap[statusClass] || statusClass;
         
+        const isOutdated = router.agent_version && controllerVersion !== 'dev' && router.agent_version !== controllerVersion;
+        const agentVerHtml = isOutdated 
+            ? '<span class="value outdated" title="版本与控制端不一致，建议重新安装">' + router.agent_version + ' ⚠</span>'
+            : '<span class="value">' + (router.agent_version || '未安装') + '</span>';
+        
         let progressHtml = '';
          const showProgress = statusClass === 'installing' || statusClass === 'uninstalling' || (statusClass === 'error' && router.install_log && router.install_log.length > 0);
          if (showProgress) {
@@ -1830,7 +1857,7 @@ function renderRouters() {
                 '<div><span class="label">系统:</span> <span class="value">' + (router.platform || '-') + '</span></div>' +
                 '<div><span class="label">网卡:</span> <span class="value">' + (router.iface || '使用全局') + '</span></div>' +
                 '<div><span class="label">健康模式:</span> <span class="value">' + (router.health_mode || '使用全局') + '</span></div>' +
-                '<div><span class="label">Agent:</span> <span class="value">' + (router.agent_version || '未安装') + '</span></div>' +
+                '<div><span class="label">Agent:</span> ' + agentVerHtml + '</div>' +
                 '<div><span class="label">VRRP状态:</span> ' + (vrrpHtml || '<span class="value">-</span>') + '</div>' +
                 '<div><span class="label">健康状态:</span> ' + (healthHtml || '<span class="value">-</span>') + '</div>' +
             '</div>' +
