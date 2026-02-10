@@ -71,10 +71,12 @@ vrrp_instance GATEWAY {
         auth_pass gateway
     }
 
+    {{ if .PeerIP }}
     unicast_src_ip {{ .SelfIP }}
     unicast_peer {
         {{ .PeerIP }}
     }
+    {{ end }}
 
     virtual_ipaddress {
         {{ .VIP }}/32 dev {{ .Interface }}

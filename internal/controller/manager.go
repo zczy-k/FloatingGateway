@@ -1559,6 +1559,7 @@ func (m *Manager) GenerateAgentConfig(r *Router) (*config.Config, error) {
 	found := false
 	for _, other := range m.config.Routers {
 		if other.Name != r.Name {
+			// Set PeerIP for Unicast VRRP support
 			cfg.Routers.PeerIP = other.Host
 			found = true
 			break
@@ -1567,6 +1568,9 @@ func (m *Manager) GenerateAgentConfig(r *Router) (*config.Config, error) {
 	if !found {
 		return nil, fmt.Errorf("未找到对端路由器，安装 Agent 需要至少配置两台路由器 (primary + secondary)")
 	}
+
+	// Ensure SelfIP is set for Unicast
+	cfg.Routers.SelfIP = r.Host
 
 	return cfg, nil
 }
