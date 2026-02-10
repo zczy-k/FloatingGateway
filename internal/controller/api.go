@@ -864,7 +864,17 @@ func (s *Server) handleVerifyDrift(w http.ResponseWriter, r *http.Request) {
 
 	// 1. Initial State Check
 	cfg := s.manager.GetConfig()
+
+	// Force probe all routers to get latest state
 	routers := s.manager.GetRouters()
+	for _, router := range routers {
+		s.manager.Probe(router)
+	}
+	// Wait a bit for probe to finish (naive wait, but effective enough)
+	time.Sleep(2 * time.Second)
+
+	// Refresh routers list
+	routers = s.manager.GetRouters()
 	var master, backup *Router
 	for _, router := range routers {
 		if router.VRRPState == "MASTER" {
@@ -874,8 +884,24 @@ func (s *Server) handleVerifyDrift(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// If still not found, try to identify by VIP holding (fallback)
 	if master == nil || backup == nil {
-		sendEvent("init", "error", "无法开始验证：集群状态不健康（未找到 MASTER 或 BACKUP 节点）。请先确保诊断全部通过。")
+		for _, router := range routers {
+			ssh := NewSSHClient(s.manager.sshConfig(router))
+			if err := ssh.Connect(); err == nil {
+				out, _ := ssh.RunCombined(fmt.Sprintf("ip addr show | grep %s", cfg.LAN.VIP))
+				if strings.Contains(out, cfg.LAN.VIP) {
+					master = router
+				} else {
+					backup = router
+				}
+				ssh.Close()
+			}
+		}
+	}
+
+	if master == nil || backup == nil {
+		sendEvent("init", "error", "无法开始验证：集群状态不健康（未找到 MASTER 或 BACKUP 节点）。请尝试刷新页面或重新诊断。")
 		return
 	}
 
