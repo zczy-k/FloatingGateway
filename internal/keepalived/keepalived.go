@@ -49,7 +49,7 @@ global_defs {
 }
 
 vrrp_script chk_gateway {
-    script "PATH=/usr/bin:/usr/local/bin:/bin:/sbin:$PATH {{ .AgentBinary }} check --mode={{ .HealthMode }}"
+    script "{{ .AgentBinary }} check --mode={{ .HealthMode }}"
     interval {{ .CheckInterval }}
     weight {{ .TrackWeight }}
     fall 2

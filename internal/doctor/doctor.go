@@ -347,14 +347,19 @@ func (d *Doctor) checkKeepalviedConfig() CheckResult {
 					// Try to execute it
 					testResult := exec.RunWithTimeout(agentBinary, 5*time.Second, "check", "--mode="+string(d.cfg.Health.Mode))
 					errOutput := strings.TrimSpace(testResult.Combined())
-					if !testResult.Success() {
+					exitCode := testResult.ExitCode
+					
+					if exitCode == 1 {
+						// Exit code 1 means health check failed (unhealthy), not script error
+						suggestion = fmt.Sprintf("健康检查脚本正常，但当前健康状态为不健康（这会导致 keepalived 无法启动）。请检查网络连接和健康检查配置（模式: %s）", d.cfg.Health.Mode)
+					} else if !testResult.Success() {
 						if errOutput == "" {
-							suggestion = fmt.Sprintf("健康检查脚本执行失败（无错误输出）。gateway-agent 路径: %s。退出码: %d", agentBinary, testResult.ExitCode)
+							suggestion = fmt.Sprintf("健康检查脚本执行失败（无错误输出）。gateway-agent 路径: %s。退出码: %d", agentBinary, exitCode)
 						} else {
-							suggestion = fmt.Sprintf("健康检查脚本无法执行。gateway-agent 路径: %s。错误: %s", agentBinary, errOutput)
+							suggestion = fmt.Sprintf("健康检查脚本执行失败。gateway-agent 路径: %s。错误: %s", agentBinary, errOutput)
 						}
 					} else {
-						suggestion = fmt.Sprintf("健康检查脚本可以执行，但 keepalived 无法找到。请运行 'gateway-agent apply' 重新生成配置", agentBinary)
+						suggestion = "健康检查脚本可以执行且健康。请运行 'gateway-agent apply' 重新生成配置"
 					}
 				}
 			}
