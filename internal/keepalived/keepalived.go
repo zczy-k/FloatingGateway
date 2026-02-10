@@ -84,9 +84,9 @@ vrrp_instance GATEWAY {
         chk_gateway
     }
 
-    notify_master "/bin/sh -c 'PATH=/usr/bin:/usr/local/bin:/bin:/sbin:$PATH {{ .AgentBinary }} notify master'"
-    notify_backup "/bin/sh -c 'PATH=/usr/bin:/usr/local/bin:/bin:/sbin:$PATH {{ .AgentBinary }} notify backup'"
-    notify_fault  "/bin/sh -c 'PATH=/usr/bin:/usr/local/bin:/bin:/sbin:$PATH {{ .AgentBinary }} notify fault'"
+    notify_master "/bin/sh -c 'PATH=/usr/bin:/usr/local/bin:/bin:/sbin:$PATH {{ .AgentBinary }} notify MASTER'"
+    notify_backup "/bin/sh -c 'PATH=/usr/bin:/usr/local/bin:/bin:/sbin:$PATH {{ .AgentBinary }} notify BACKUP'"
+    notify_fault  "/bin/sh -c 'PATH=/usr/bin:/usr/local/bin:/bin:/sbin:$PATH {{ .AgentBinary }} notify FAULT'"
 }
 `
 
@@ -133,6 +133,15 @@ func (r *Renderer) buildTemplateData() *TemplateData {
 
 	// Find agent binary path
 	agentBinary := FindAgentBinary()
+	// Force absolute path for reliability in generated config
+	if !strings.HasPrefix(agentBinary, "/") {
+		if abs, err := filepath.Abs(agentBinary); err == nil {
+			agentBinary = abs
+		} else {
+			// Fallback to standard path if we can't determine absolute path
+			agentBinary = "/gateway-agent/gateway-agent"
+		}
+	}
 
 	return &TemplateData{
 		Role:            string(r.cfg.Role),

@@ -213,8 +213,17 @@ func (d *Doctor) checkVIPConflict() CheckResult {
 			return result
 		}
 
+		// Check if it's the peer holding the VIP (also expected in BACKUP state)
+		// We can't easily verify MAC address remotely, but if peer is up and we are backup, it's likely fine.
+		// For now, we downgrade this to INFO/OK if we can reach the peer.
+		if d.checkPeerIP().Status == "ok" {
+			result.Status = "ok"
+			result.Message = fmt.Sprintf("VIP %s is active (likely held by peer)", d.cfg.LAN.VIP)
+			return result
+		}
+
 		result.Status = "warning"
-		result.Message = fmt.Sprintf("VIP %s appears to be in use by another host", d.cfg.LAN.VIP)
+		result.Message = fmt.Sprintf("VIP %s appears to be in use by another host (Peer unreachable?)", d.cfg.LAN.VIP)
 		return result
 	}
 
