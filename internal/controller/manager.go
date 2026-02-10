@@ -821,7 +821,8 @@ func (m *Manager) Doctor(r *Router) (string, error) {
 
 	// Run doctor with absolute path and get JSON output
 	// Note: doctor may return non-zero exit code if there are errors, but output is still valid JSON
-	output, err := client.RunCombined("/usr/bin/gateway-agent doctor --json")
+	docCmd := fmt.Sprintf("%s doctor --json 2>/dev/null || gateway-agent doctor --json", DefaultAgentPath)
+	output, err := client.RunCombined(docCmd)
 
 	// If there's output (even with error), try to return it as it's likely valid JSON
 	if output != "" {
@@ -947,7 +948,7 @@ func (m *Manager) downloadAgentBinary(r *Router, goos, goarch string) (string, e
 	remoteAssetName := fmt.Sprintf("gateway-agent-%s-%s", goos, goarch)
 	// Local cache name (includes version to ensure matching versions)
 	localCacheName := fmt.Sprintf("%s-%s", remoteAssetName, version.Version)
-	
+
 	cacheDir := m.agentCacheDir()
 	destPath := filepath.Join(cacheDir, localCacheName)
 
@@ -1207,20 +1208,20 @@ func (m *Manager) setupService(client *SSHClient, platform Platform) error {
 
 // setupProcdService sets up a procd service on OpenWrt.
 func (m *Manager) setupProcdService(client *SSHClient) error {
-	initScript := `#!/bin/sh /etc/rc.common
+	initScript := fmt.Sprintf(`#!/bin/sh /etc/rc.common
 START=99
 STOP=10
 USE_PROCD=1
 
 start_service() {
     procd_open_instance
-    procd_set_param command /usr/bin/gateway-agent run
+    procd_set_param command %s run
     procd_set_param respawn
     procd_set_param stdout 1
     procd_set_param stderr 1
     procd_close_instance
 }
-`
+`, DefaultAgentPath)
 	if err := client.WriteFile("/etc/init.d/gateway-agent", []byte(initScript), 0755); err != nil {
 		return err
 	}
@@ -1248,20 +1249,20 @@ start_service() {
 
 // setupSystemdService sets up a systemd service on Linux.
 func (m *Manager) setupSystemdService(client *SSHClient) error {
-	unitFile := `[Unit]
+	unitFile := fmt.Sprintf(`[Unit]
 Description=Gateway Agent
 After=network.target keepalived.service
 Wants=keepalived.service
 
 [Service]
 Type=simple
-ExecStart=/usr/bin/gateway-agent run
+ExecStart=%s run
 Restart=always
 RestartSec=5
 
 [Install]
 WantedBy=multi-user.target
-`
+`, DefaultAgentPath)
 	if err := client.WriteFile("/etc/systemd/system/gateway-agent.service", []byte(unitFile), 0644); err != nil {
 		return err
 	}

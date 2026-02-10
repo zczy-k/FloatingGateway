@@ -177,7 +177,7 @@ func FindAgentBinary() string {
 		return path
 	}
 	// Default to standard location
-	return "/usr/bin/gateway-agent"
+	return "/etc/gateway-agent/gateway-agent"
 }
 
 // FindConfigPath finds the keepalived config file path.
