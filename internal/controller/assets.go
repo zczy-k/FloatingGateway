@@ -2444,6 +2444,9 @@ document.addEventListener('DOMContentLoaded', () => {
         } else if (event.status === 'success') {
             icon.innerHTML = '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="var(--success)" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>';
         } else if (event.status === 'error') {
+            // Show more prominent error
+            desc.style.color = 'var(--danger)';
+            desc.style.fontWeight = 'bold';
             icon.innerHTML = '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="var(--danger)" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>';
         }
     }

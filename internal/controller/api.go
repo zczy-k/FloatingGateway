@@ -929,7 +929,30 @@ func (s *Server) handleVerifyDrift(w http.ResponseWriter, r *http.Request) {
 	if driftSuccess {
 		sendEvent("verify_drift", "success", "VIP 访问正常，漂移成功！")
 	} else {
-		sendEvent("verify_drift", "error", "漂移失败：主节点故障后 VIP 无法访问")
+		// Deep diagnostics for failure
+		sendEvent("verify_drift", "running", "漂移失败，正在进行深度诊断...")
+
+		// Connect to backup router to check status
+		sshBackup := NewSSHClient(s.manager.sshConfig(backup))
+		if err := sshBackup.Connect(); err == nil {
+			defer sshBackup.Close()
+
+			// Check if it has VIP
+			out, _ := sshBackup.RunCombined(fmt.Sprintf("ip addr show | grep %s", cfg.LAN.VIP))
+			hasVIP := strings.Contains(out, cfg.LAN.VIP)
+
+			// Check Keepalived state
+			stateOut, _ := sshBackup.RunCombined("cat /tmp/keepalived.GATEWAY.state")
+			state := strings.TrimSpace(stateOut)
+
+			if hasVIP {
+				sendEvent("verify_drift", "error", fmt.Sprintf("诊断结果：备节点 (%s) 已接管 VIP，但控制端无法访问。可能是防火墙拦截了 ICMP 或 ARP 广播未生效。", backup.Name))
+			} else {
+				sendEvent("verify_drift", "error", fmt.Sprintf("诊断结果：备节点 (%s) 未能接管 VIP。当前状态: %s。可能是 VRRP 组播被拦截。", backup.Name, state))
+			}
+		} else {
+			sendEvent("verify_drift", "error", fmt.Sprintf("诊断失败：无法连接到备节点 (%s) 进行检查。", backup.Name))
+		}
 	}
 
 	// 5. Restore
