@@ -93,10 +93,16 @@ func (c *PingChecker) Check(ctx context.Context) *Result {
 	// Detect ping version (Linux vs BSD/macOS)
 	if exec.CommandExists("ping") {
 		// Try Linux style first (-c count, -W timeout in seconds)
-		args = []string{"-c", "1", "-W", fmt.Sprintf("%d", int(c.timeout.Seconds())), c.target}
+		// We also add -n to avoid DNS resolution during ping
+		args = []string{"-c", "1", "-W", fmt.Sprintf("%d", int(c.timeout.Seconds())), "-n", c.target}
+	} else {
+		result.OK = false
+		result.ErrorCode = "PING_CMD_NOT_FOUND"
+		result.Message = "system ping command not found"
+		return result
 	}
 
-	timeoutCtx, cancel := context.WithTimeout(ctx, c.timeout)
+	timeoutCtx, cancel := context.WithTimeout(ctx, c.timeout+1*time.Second) // Give it a bit more time than the -W timeout
 	defer cancel()
 
 	cmdResult := exec.Run(timeoutCtx, "ping", args...)
@@ -107,18 +113,35 @@ func (c *PingChecker) Check(ctx context.Context) *Result {
 		result.OK = true
 		result.Message = "ping successful"
 		// Try to extract RTT from output
-		if strings.Contains(cmdResult.Stdout, "time=") {
-			// Parse time from output like "time=1.23 ms"
-			parts := strings.Split(cmdResult.Stdout, "time=")
-			if len(parts) > 1 {
-				var rtt float64
-				fmt.Sscanf(parts[1], "%f", &rtt)
-				if rtt > 0 {
-					result.LatencyMs = int64(rtt)
+		// We use a more robust regex-like parsing for different ping formats
+		output := cmdResult.Stdout
+		if strings.Contains(output, "time=") {
+			// Extract value between "time=" and " ms"
+			idx := strings.Index(output, "time=")
+			if idx != -1 {
+				sub := output[idx+5:]
+				endIdx := strings.Index(sub, " ")
+				if endIdx != -1 {
+					var rtt float64
+					fmt.Sscanf(sub[:endIdx], "%f", &rtt)
+					if rtt > 0 {
+						result.LatencyMs = int64(rtt)
+					}
 				}
 			}
 		}
 	} else {
+		// Fallback for some busybox versions where -W might not be supported or behaves differently
+		if cmdResult.ExitCode != 0 && strings.Contains(cmdResult.Stderr, "invalid option") {
+			// Retry with simpler args
+			args = []string{"-c", "1", c.target}
+			cmdResult = exec.Run(timeoutCtx, "ping", args...)
+			if cmdResult.Success() {
+				result.OK = true
+				return result
+			}
+		}
+
 		result.OK = false
 		result.ErrorCode = "PING_FAILED"
 		result.Message = fmt.Sprintf("ping failed: %s", cmdResult.Combined())

@@ -41,17 +41,60 @@ func NewServer(manager *Manager) *Server {
 // setupRoutes configures HTTP handlers.
 func (s *Server) setupRoutes() {
 	// API routes
-	s.mux.HandleFunc("/api/routers", s.handleRouters)
-	s.mux.HandleFunc("/api/routers/", s.handleRouter)
-	s.mux.HandleFunc("/api/status", s.handleStatus)
-	s.mux.HandleFunc("/api/config", s.handleConfig)
-	s.mux.HandleFunc("/api/detect-net", s.handleDetectNet)
-	s.mux.HandleFunc("/api/routers/install-all", s.handleInstallAll)
-	s.mux.HandleFunc("/api/version", s.handleVersion)
-	s.mux.HandleFunc("/api/upgrade", s.handleUpgrade)
+	s.mux.HandleFunc("/api/routers", s.authMiddleware(s.handleRouters))
+	s.mux.HandleFunc("/api/routers/", s.authMiddleware(s.handleRouter))
+	s.mux.HandleFunc("/api/status", s.authMiddleware(s.handleStatus))
+	s.mux.HandleFunc("/api/config", s.authMiddleware(s.handleConfig))
+	s.mux.HandleFunc("/api/detect-net", s.authMiddleware(s.handleDetectNet))
+	s.mux.HandleFunc("/api/routers/install-all", s.authMiddleware(s.handleInstallAll))
+	s.mux.HandleFunc("/api/version", s.authMiddleware(s.handleVersion))
+	s.mux.HandleFunc("/api/upgrade", s.authMiddleware(s.handleUpgrade))
 
 	// Static files (web UI)
-	s.mux.HandleFunc("/", s.handleStatic)
+	s.mux.HandleFunc("/", s.authMiddleware(s.handleStatic))
+}
+
+// authMiddleware provides simple Basic Auth and Origin protection.
+func (s *Server) authMiddleware(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		// Basic CSRF protection: check Origin/Referer for API requests
+		if strings.HasPrefix(r.URL.Path, "/api/") && r.Method != http.MethodGet {
+			origin := r.Header.Get("Origin")
+			referer := r.Header.Get("Referer")
+			host := r.Host
+
+			// If origin exists, it must match host
+			if origin != "" {
+				if !strings.Contains(origin, host) {
+					http.Error(w, "Forbidden: Cross-site request blocked", http.StatusForbidden)
+					return
+				}
+			} else if referer != "" {
+				if !strings.Contains(referer, host) {
+					http.Error(w, "Forbidden: Cross-site request blocked", http.StatusForbidden)
+					return
+				}
+			}
+		}
+
+		cfg := s.manager.GetConfig()
+		if cfg.Password == "" {
+			// No password set, allow all
+			next(w, r)
+			return
+		}
+
+		user, pass, ok := r.BasicAuth()
+		if !ok || pass != cfg.Password {
+			w.Header().Set("WWW-Authenticate", `Basic realm="Floating Gateway Controller"`)
+			http.Error(w, "Unauthorized", http.StatusUnauthorized)
+			return
+		}
+
+		// User field is ignored for now, any user with correct password works
+		_ = user
+		next(w, r)
+	}
 }
 
 // Start starts the HTTP server.

@@ -157,7 +157,15 @@ func FindAgentBinary() string {
 	paths := []string{
 		"/usr/bin/gateway-agent",
 		"/usr/local/bin/gateway-agent",
+		"/etc/gateway-agent/gateway-agent", // Possible custom location
 	}
+	// Try to get executable path of current running process if we are the agent
+	if exe, err := os.Executable(); err == nil {
+		if strings.Contains(exe, "gateway-agent") {
+			return exe
+		}
+	}
+
 	for _, p := range paths {
 		if _, err := os.Stat(p); err == nil {
 			return p
