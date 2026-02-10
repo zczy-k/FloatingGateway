@@ -2350,15 +2350,15 @@ document.addEventListener('DOMContentLoaded', () => {
             const div = document.createElement('div');
             div.className = 'drift-step';
             div.id = 'step-' + step.id;
-            div.innerHTML = `
+            div.innerHTML = ` + "`" + `
                 <div class="step-icon">
                     <div class="step-dot" style="width: 8px; height: 8px; background: var(--text-secondary); border-radius: 50%;"></div>
                 </div>
                 <div class="step-content">
-                    <div class="step-title">${step.title}</div>
+                    <div class="step-title">${"${step.title}"}</div>
                     <div class="step-desc">等待开始...</div>
                 </div>
-            `;
+            ` + "`" + `;
             stepsContainer.appendChild(div);
         });
         
