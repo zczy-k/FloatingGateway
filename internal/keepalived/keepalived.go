@@ -54,6 +54,7 @@ vrrp_script chk_gateway {
     weight {{ .TrackWeight }}
     fall 3
     rise 2
+    user root
     init_fail
 }
 
@@ -277,13 +278,11 @@ func GetStatus() *Status {
 		ConfigPath: FindConfigPath(),
 	}
 
-	// Check if running
-	result := exec.RunWithTimeout("pgrep", 5*time.Second, "-x", "keepalived")
-	status.Running = result.Success()
+	status.Running = IsRunning()
 
 	// Check config validity
 	if _, err := os.Stat(status.ConfigPath); err == nil {
-		result = exec.RunWithTimeout("keepalived", 5*time.Second, "-t", "-f", status.ConfigPath)
+		result := exec.RunWithTimeout("keepalived", 5*time.Second, "-t", "-f", status.ConfigPath)
 		status.ConfigValid = result.Success()
 		if !status.ConfigValid {
 			status.Error = result.Combined()
@@ -292,7 +291,7 @@ func GetStatus() *Status {
 
 	// Try to get VRRP state
 	// This is platform-specific and may not always work
-	result = exec.RunWithTimeout("cat", 5*time.Second, "/tmp/keepalived.GATEWAY.state")
+	result := exec.RunWithTimeout("cat", 5*time.Second, "/tmp/keepalived.GATEWAY.state")
 	if result.Success() {
 		state := strings.TrimSpace(result.Stdout)
 		status.VRRPState = state
@@ -303,7 +302,14 @@ func GetStatus() *Status {
 
 // IsRunning checks if keepalived is running.
 func IsRunning() bool {
+	// Try pgrep first
 	result := exec.RunWithTimeout("pgrep", 5*time.Second, "-x", "keepalived")
+	if result.Success() {
+		return true
+	}
+	
+	// Fallback to pidof (Standard on OpenWrt/BusyBox)
+	result = exec.RunWithTimeout("pidof", 5*time.Second, "keepalived")
 	return result.Success()
 }
 

@@ -1180,8 +1180,10 @@ start_service() {
 	// Start gateway-agent
 	client.RunCombined("/etc/init.d/gateway-agent restart")
 
-	// Stop keepalived first (in case it's already running with old config)
+	// Stop keepalived first (in case it's already running with old config or conflicting config)
 	client.RunCombined("/etc/init.d/keepalived stop")
+	// Kill any stray keepalived processes (especially on iStoreOS/OpenWrt)
+	client.RunCombined("killall -9 keepalived 2>/dev/null")
 	time.Sleep(1 * time.Second)
 
 	// Start keepalived
@@ -1224,8 +1226,9 @@ WantedBy=multi-user.target
 	// Start gateway-agent
 	client.RunCombined("systemctl restart gateway-agent")
 
-	// Stop keepalived first (in case it's already running with old config)
+	// Stop keepalived first (in case it's already running with old config or conflicting config)
 	client.RunCombined("systemctl stop keepalived")
+	client.RunCombined("killall -9 keepalived 2>/dev/null")
 	time.Sleep(1 * time.Second)
 
 	// Start keepalived
