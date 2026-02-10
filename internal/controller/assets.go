@@ -2221,6 +2221,16 @@ document.addEventListener('DOMContentLoaded', () => {
             
             // Auto-fill interface to form
             form.iface.value = result.iface;
+
+            // Auto-select best health mode based on role
+            const role = form.role.value;
+            if (role === 'primary') {
+                form.health_mode.value = 'basic';
+                log('已根据角色建议: 主路由默认使用基础模式 (更稳定)');
+            } else if (role === 'secondary') {
+                form.health_mode.value = 'internet';
+                log('已根据角色建议: 旁路由默认使用互联网模式 (更可靠)');
+            }
             
             // Store result for later use
             window._lastProbeResult = result;

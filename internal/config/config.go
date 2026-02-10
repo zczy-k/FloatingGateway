@@ -133,6 +133,7 @@ func DefaultConfig() *Config {
 			IntervalSec:  2,
 			FailCount:    3,
 			RecoverCount: 5,
+			KOfN:         "2/3",
 			Basic: ChecksConfig{
 				Checks: []CheckConfig{
 					{Type: "ping", Target: "223.5.5.5", Timeout: 3},
@@ -141,9 +142,9 @@ func DefaultConfig() *Config {
 			},
 			Internet: ChecksConfig{
 				Checks: []CheckConfig{
-					{Type: "ping", Target: "1.1.1.1", Timeout: 3},
-					{Type: "dns", Resolver: "1.1.1.1", Domain: "google.com", Timeout: 3},
-					{Type: "tcp", Target: "1.1.1.1", Port: 443, Timeout: 3},
+					{Type: "ping", Target: "223.5.5.5", Timeout: 3},
+					{Type: "dns", Resolver: "119.29.29.29", Domain: "baidu.com", Timeout: 3},
+					{Type: "tcp", Target: "114.114.114.114", Port: 53, Timeout: 3},
 				},
 			},
 		},
