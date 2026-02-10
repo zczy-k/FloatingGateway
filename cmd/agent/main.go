@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -397,8 +398,12 @@ func notifyCmd(args []string) {
 		os.Exit(1)
 	}
 
-	state := args[0]
+	state := strings.ToUpper(args[0])
 	cfg, _ := loadConfig(defaultConfigPath)
+
+	// Persist state for status reporting
+	stateFile := "/tmp/keepalived.GATEWAY.state"
+	_ = os.WriteFile(stateFile, []byte(state), 0644)
 
 	iface := "eth0"
 	vip := ""
@@ -408,21 +413,24 @@ func notifyCmd(args []string) {
 	}
 
 	switch state {
-	case "master", "MASTER":
+	case "MASTER":
 		fmt.Printf("Transitioning to MASTER state\n")
-		// Send GARP to announce VIP
+		// Send multiple GARPs to ensure ARP cache update
 		if vip != "" {
-			if err := netutil.SendGARP(vip, iface); err != nil {
-				fmt.Fprintf(os.Stderr, "Warning: GARP failed: %v\n", err)
-			} else {
-				fmt.Printf("Sent GARP for %s on %s\n", vip, iface)
+			for i := 0; i < 3; i++ {
+				if err := netutil.SendGARP(vip, iface); err != nil {
+					fmt.Fprintf(os.Stderr, "Warning: GARP failed: %v\n", err)
+				} else {
+					fmt.Printf("Sent GARP for %s on %s\n", vip, iface)
+				}
+				time.Sleep(1 * time.Second)
 			}
 		}
 
-	case "backup", "BACKUP":
+	case "BACKUP":
 		fmt.Printf("Transitioning to BACKUP state\n")
 
-	case "fault", "FAULT":
+	case "FAULT":
 		fmt.Printf("Transitioning to FAULT state\n")
 
 	default:

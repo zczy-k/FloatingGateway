@@ -291,11 +291,51 @@ func GetStatus() *Status {
 	}
 
 	// Try to get VRRP state
-	// This is platform-specific and may not always work
-	result := exec.RunWithTimeout("cat", 5*time.Second, "/tmp/keepalived.GATEWAY.state")
+	// 1. Check state file (updated by notify scripts)
+	result := exec.RunWithTimeout("cat", 2*time.Second, "/tmp/keepalived.GATEWAY.state")
 	if result.Success() {
 		state := strings.TrimSpace(result.Stdout)
-		status.VRRPState = state
+		if state != "" {
+			status.VRRPState = state
+		}
+	}
+
+	// 2. Fallback: Check if VIP is actually assigned to the interface
+	// This provides a reliable source of truth even if notify scripts fail
+	if status.VRRPState == "" || status.VRRPState == "UNKNOWN" {
+		cfgFile := FindConfigPath()
+		if data, err := os.ReadFile(cfgFile); err == nil {
+			content := string(data)
+			// Extract VIP and Interface from config
+			vip := ""
+			iface := ""
+			lines := strings.Split(content, "\n")
+			for _, line := range lines {
+				line = strings.TrimSpace(line)
+				if strings.HasPrefix(line, "virtual_ipaddress {") {
+					// Next line usually contains VIP
+					continue
+				}
+				if strings.Contains(line, "/32 dev") {
+					parts := strings.Fields(line)
+					if len(parts) >= 3 {
+						vip = strings.Split(parts[0], "/")[0]
+						iface = parts[2]
+					}
+				}
+			}
+
+			if vip != "" && iface != "" {
+				// Check if IP exists on interface
+				checkCmd := fmt.Sprintf("ip addr show dev %s | grep 'inet %s/'", iface, vip)
+				res := exec.RunWithTimeout("sh", 2*time.Second, "-c", checkCmd)
+				if res.Success() {
+					status.VRRPState = "MASTER"
+				} else if status.Running {
+					status.VRRPState = "BACKUP"
+				}
+			}
+		}
 	}
 
 	return status

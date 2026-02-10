@@ -1330,6 +1330,16 @@ start_service() {
 	client.RunCombined("uci set keepalived.globals.config_file='/etc/keepalived/keepalived.conf' 2>/dev/null")
 	client.RunCombined("uci commit keepalived 2>/dev/null")
 
+	// Allow VRRP in firewall
+	client.RunCombined("uci delete firewall.vrrp 2>/dev/null")
+	client.RunCombined("uci set firewall.vrrp=rule")
+	client.RunCombined("uci set firewall.vrrp.name='Allow-VRRP'")
+	client.RunCombined("uci set firewall.vrrp.src='lan'")
+	client.RunCombined("uci set firewall.vrrp.proto='112'")
+	client.RunCombined("uci set firewall.vrrp.target='ACCEPT'")
+	client.RunCombined("uci commit firewall")
+	client.RunCombined("/etc/init.d/firewall reload 2>/dev/null")
+
 	// Start keepalived
 	if output, err := client.RunCombined("/etc/init.d/keepalived start"); err != nil {
 		return fmt.Errorf("start keepalived: %w (output: %s)", err, output)
@@ -1375,6 +1385,16 @@ WantedBy=multi-user.target
 	// Use multiple ways to ensure it's killed, even if killall is missing
 	client.RunCombined("pkill -9 keepalived || killall -9 keepalived || (ps -w | grep keepalived | grep -v grep | awk '{print $1}' | xargs kill -9) 2>/dev/null")
 	time.Sleep(1 * time.Second)
+
+	// Allow VRRP in firewall
+	if _, err := client.RunCombined("which ufw"); err == nil {
+		client.RunCombined("ufw allow proto vrrp 2>/dev/null")
+	}
+	if _, err := client.RunCombined("which firewall-cmd"); err == nil {
+		client.RunCombined("firewall-cmd --permanent --add-rich-rule='rule protocol value=\"vrrp\" accept' 2>/dev/null")
+		client.RunCombined("firewall-cmd --reload 2>/dev/null")
+	}
+	client.RunCombined("iptables -I INPUT -p vrrp -j ACCEPT 2>/dev/null")
 
 	// Start keepalived
 	if output, err := client.RunCombined("systemctl start keepalived"); err != nil {
