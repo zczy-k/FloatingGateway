@@ -213,6 +213,12 @@ func (s *Server) handleRouterCRUD(w http.ResponseWriter, r *http.Request, router
 		if update.Role != "" {
 			router.Role = update.Role
 		}
+		if update.Iface != "" {
+			router.Iface = update.Iface
+		}
+		if update.HealthMode != "" {
+			router.HealthMode = update.HealthMode
+		}
 		s.manager.SaveConfig()
 		writeJSON(w, http.StatusOK, router)
 

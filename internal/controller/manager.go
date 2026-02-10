@@ -50,7 +50,8 @@ type Router struct {
 	KeyFile      string       `yaml:"key_file,omitempty" json:"key_file,omitempty"`
 	Passphrase   string       `yaml:"passphrase,omitempty" json:"passphrase,omitempty"`
 	Role         config.Role  `yaml:"role" json:"role"`
-	Iface        string       `yaml:"iface,omitempty" json:"iface,omitempty"` // Per-router interface override
+	Iface        string       `yaml:"iface,omitempty" json:"iface,omitempty"`       // Per-router interface override
+	HealthMode   string       `yaml:"health_mode,omitempty" json:"health_mode,omitempty"` // Per-router health mode (basic/internet)
 	Status       RouterStatus `yaml:"-" json:"status"`
 	Platform     Platform     `yaml:"-" json:"platform"`
 	LastSeen     time.Time    `yaml:"-" json:"last_seen,omitempty"`
@@ -1285,7 +1286,11 @@ func (m *Manager) GenerateAgentConfig(r *Router) (*config.Config, error) {
 	cfg.LAN.Iface = r.Iface
 	
 	cfg.Keepalived.VRID = m.config.Keepalived.VRID
-	if m.config.Health.Mode != "" {
+	
+	// Use router's own health mode if specified, otherwise use global setting
+	if r.HealthMode != "" {
+		cfg.Health.Mode = config.HealthMode(r.HealthMode)
+	} else if m.config.Health.Mode != "" {
 		cfg.Health.Mode = m.config.Health.Mode
 	}
 

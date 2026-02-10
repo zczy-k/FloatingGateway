@@ -174,10 +174,22 @@ const indexHTML = `<!DOCTYPE html>
                                 <option value="secondary" selected>旁路由 (Secondary - 首选网关)</option>
                             </select>
                         </div>
-                        <div class="form-group">
-                            <label>网卡接口</label>
-                            <input type="text" name="iface" required placeholder="如 br-lan、eth0、ens18">
-                            <small class="form-hint">点击上方"探测"按钮可自动获取</small>
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label>网卡接口</label>
+                                <input type="text" name="iface" required placeholder="如 br-lan、eth0、ens18">
+                                <small class="form-hint">点击上方"探测"按钮可自动获取</small>
+                            </div>
+                            <div class="form-group">
+                                <label>健康检查模式</label>
+                                <select name="health_mode">
+                                    <option value="">使用全局设置</option>
+                                    <option value="basic">基础模式 (仅检测网关)</option>
+                                    <option value="internet">互联网模式 (检测外网)</option>
+                                </select>
+                                <small class="form-hint">留空则使用全局设置</small>
+                            </div>
+                        </div>
                         </div>
                     </div>
                     <div class="modal-footer">
@@ -1817,6 +1829,7 @@ function renderRouters() {
                 '<div><span class="label">主机:</span> <span class="value">' + router.host + ':' + router.port + '</span></div>' +
                 '<div><span class="label">系统:</span> <span class="value">' + (router.platform || '-') + '</span></div>' +
                 '<div><span class="label">网卡:</span> <span class="value">' + (router.iface || '使用全局') + '</span></div>' +
+                '<div><span class="label">健康模式:</span> <span class="value">' + (router.health_mode || '使用全局') + '</span></div>' +
                 '<div><span class="label">Agent:</span> <span class="value">' + (router.agent_version || '未安装') + '</span></div>' +
                 '<div><span class="label">VRRP状态:</span> ' + (vrrpHtml || '<span class="value">-</span>') + '</div>' +
                 '<div><span class="label">健康状态:</span> ' + (healthHtml || '<span class="value">-</span>') + '</div>' +
@@ -2261,7 +2274,8 @@ document.addEventListener('DOMContentLoaded', () => {
             password: form.password.value,
             key_file: form.key_file.value,
             role: form.role.value,
-            iface: form.iface.value || ''
+            iface: form.iface.value || '',
+            health_mode: form.health_mode.value || ''
         };
         
         try {
