@@ -974,7 +974,24 @@ func (s *Server) handleVerifyDrift(w http.ResponseWriter, r *http.Request) {
 			if hasVIP {
 				sendEvent("verify_drift", "error", fmt.Sprintf("诊断结果：备节点 (%s) 已接管 VIP，但控制端无法访问。可能是防火墙拦截了 ICMP 或 ARP 广播未生效。", backup.Name))
 			} else {
-				sendEvent("verify_drift", "error", fmt.Sprintf("诊断结果：备节点 (%s) 未能接管 VIP。当前状态: %s。可能是 VRRP 组播被拦截 (请检查 PVE/ESXi 网卡防火墙)。", backup.Name, state))
+				// Check for unicast config
+				isUnicast := false
+				_, _, err := sshBackup.Run("grep 'unicast_peer' /etc/keepalived/keepalived.conf")
+				if err == nil {
+					isUnicast = true
+				}
+
+				if isUnicast {
+					// Check connectivity to master
+					pingOut, _ := sshBackup.RunCombined(fmt.Sprintf("ping -c 1 -W 1 %s", master.Host))
+					if strings.Contains(pingOut, "1 received") || strings.Contains(pingOut, "1 packets received") {
+						sendEvent("verify_drift", "error", fmt.Sprintf("诊断结果：备节点 (%s) 未能接管 VIP。单播通信正常 (Ping通)，但 VRRP 协商失败。请检查 Keepalived 日志。", backup.Name))
+					} else {
+						sendEvent("verify_drift", "error", fmt.Sprintf("诊断结果：备节点 (%s) 未能接管 VIP。单播通信失败 (无法 Ping 通主节点 %s)。请检查底层网络连通性。", backup.Name, master.Host))
+					}
+				} else {
+					sendEvent("verify_drift", "error", fmt.Sprintf("诊断结果：备节点 (%s) 未能接管 VIP。当前状态: %s。可能是 VRRP 组播被拦截 (请检查 PVE/ESXi 网卡防火墙)。", backup.Name, state))
+				}
 			}
 		} else {
 			sendEvent("verify_drift", "error", fmt.Sprintf("诊断失败：无法连接到备节点 (%s) 进行检查。", backup.Name))
