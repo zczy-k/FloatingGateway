@@ -1714,6 +1714,11 @@ let refreshTimer = null;
 let previousRouterStates = {}; // Track previous states to detect changes
 let controllerVersion = 'dev';
 
+function normalizeVersion(v) {
+    if (!v) return '';
+    return v.replace('gateway-agent', '').replace('v', '').trim();
+}
+
 async function refreshStatus() {
     try {
         const [status, cfg, versionInfo] = await Promise.all([
@@ -1724,7 +1729,7 @@ async function refreshStatus() {
         
         globalConfig = cfg;
         controllerVersion = versionInfo.current_version;
-        $('#controller-version').textContent = controllerVersion;
+        $('#controller-version').textContent = controllerVersion.startsWith('v') ? controllerVersion : 'v' + controllerVersion;
         
         $('#vip-address').textContent = status.vip || '-';
         $('#current-master').textContent = status.current_master || '无';
@@ -1814,10 +1819,14 @@ function renderRouters() {
         };
         const statusText = statusTextMap[statusClass] || statusClass;
         
-        const isOutdated = router.agent_version && controllerVersion !== 'dev' && router.agent_version !== controllerVersion;
+        const normAgentVer = normalizeVersion(router.agent_version);
+        const normCtrlVer = normalizeVersion(controllerVersion);
+        const isOutdated = normAgentVer && normCtrlVer !== 'dev' && normAgentVer !== normCtrlVer;
+        
+        const displayAgentVer = router.agent_version ? router.agent_version.replace('gateway-agent ', '') : '未安装';
         const agentVerHtml = isOutdated 
-            ? '<span class="value outdated" title="版本与控制端不一致，建议重新安装">' + router.agent_version + ' ⚠</span>'
-            : '<span class="value">' + (router.agent_version || '未安装') + '</span>';
+            ? '<span class="value outdated" title="版本与控制端不一致 (' + controllerVersion + ')，建议重新安装">' + displayAgentVer + ' ⚠</span>'
+            : '<span class="value">' + displayAgentVer + '</span>';
         
         let progressHtml = '';
          const showProgress = statusClass === 'installing' || statusClass === 'uninstalling' || (statusClass === 'error' && router.install_log && router.install_log.length > 0);
