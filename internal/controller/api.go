@@ -123,7 +123,7 @@ func (s *Server) Stop() error {
 
 // startProbing starts periodic router probing.
 func (s *Server) startProbing() {
-	s.probeTick = time.NewTicker(30 * time.Second)
+	s.probeTick = time.NewTicker(5 * time.Second)
 	s.wg.Add(1)
 	go func() {
 		defer s.wg.Done()

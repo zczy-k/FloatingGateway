@@ -157,6 +157,7 @@ const indexHTML = `<!DOCTYPE html>
                     <section class="help-section warning">
                         <h4>⚠️ 常见问题与注意事项</h4>
                         <ul>
+                            <li><strong>实时状态</strong>：控制台每 5 秒自动同步一次集群状态。当发生 VIP 漂移时，系统会弹出黄色警告通知，并高亮显示当前新的主控设备。</li>
                             <li><strong>PVE/虚拟化环境</strong>：必须在 PVE 网卡设置中<strong>关闭防火墙</strong>或开启 <strong>IP Anti-Spoofing</strong>，否则 VRRP 组播包会被拦截，导致两台路由器都变成 MASTER（抢占冲突）。</li>
                             <li><strong>DHCP 选项 3</strong>：为了让全家设备自动生效，请在 OpenWrt 的 DHCP 选项中添加 <code>3,虚拟IP地址</code>。</li>
                             <li><strong>配置路径</strong>：Agent 会在 <code>/gateway-agent/</code> 下运行，请勿手动删除该目录。</li>
@@ -653,6 +654,12 @@ section {
 @keyframes pulse {
     0%, 100% { opacity: 1; }
     50% { opacity: 0.3; }
+}
+
+@keyframes pulse-drift {
+    0% { transform: scale(1); box-shadow: 0 0 0 0 rgba(210, 153, 34, 0.7); }
+    70% { transform: scale(1.05); box-shadow: 0 0 0 10px rgba(210, 153, 34, 0); }
+    100% { transform: scale(1); box-shadow: 0 0 0 0 rgba(210, 153, 34, 0); }
 }
 
 .router-info {
@@ -1850,6 +1857,7 @@ async function apiCall(endpoint, options = {}) {
 // Status update
 let refreshTimer = null;
 let previousRouterStates = {}; // Track previous states to detect changes
+let previousMaster = null;     // Track previous master to detect drift
 let controllerVersion = 'dev';
 
 function normalizeVersion(v) {
@@ -1871,6 +1879,19 @@ async function refreshStatus() {
         
         $('#vip-address').textContent = status.vip || '-';
         $('#current-master').textContent = status.current_master || '无';
+        
+        // Detect Master Drift
+        if (previousMaster !== null && status.current_master && previousMaster !== status.current_master) {
+            const msg = '🔄 发生 VIP 漂移：' + (previousMaster || '未知') + ' ➜ ' + status.current_master;
+            showToast(msg, 'warning', 8000);
+            log(msg, 'warning');
+            
+            // Add a temporary visual flash effect to the header chip
+            const chip = $('#current-master').parentElement;
+            chip.style.animation = 'pulse-drift 2s infinite';
+            setTimeout(() => { chip.style.animation = ''; }, 6000);
+        }
+        previousMaster = status.current_master;
         
         const newRouters = status.routers || [];
         
@@ -1905,8 +1926,9 @@ async function refreshStatus() {
         updateWizard();
 
         // If any router is installing/uninstalling, poll faster (every 2s)
+        // Otherwise poll every 5s for near-realtime drift detection
         const isBusy = routers.some(r => r.status === 'installing' || r.status === 'uninstalling');
-        const interval = isBusy ? 2000 : 30000;
+        const interval = isBusy ? 2000 : 5000;
         
         if (refreshTimer) clearTimeout(refreshTimer);
         refreshTimer = setTimeout(refreshStatus, interval);
