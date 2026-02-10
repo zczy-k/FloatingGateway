@@ -841,32 +841,7 @@ func (s *Server) handleVerifyDrift(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 1. Initial State Check
-	cfg := s.manager.GetConfig()
-	routers := s.manager.GetRouters()
-	var master, backup *Router
-	for _, router := range routers {
-		if router.VRRPState == "MASTER" {
-			master = router
-		} else if router.VRRPState == "BACKUP" {
-			backup = router
-		}
-	}
-
-	if master == nil || backup == nil {
-		writeJSON(w, http.StatusOK, map[string]interface{}{
-			"success": false,
-			"step":    "初始检查",
-			"message": "无法开始验证：集群状态不健康（未找到 MASTER 或 BACKUP 节点）。请先确保诊断全部通过。",
-		})
-		return
-	}
-
-	// Stream response using Server-Sent Events (SSE) style flushing or just long polling
-	// For simplicity, we'll return a streamed text response if client accepts it, otherwise blocking JSON
-	// Here we implement blocking JSON for simplicity in MVP, but real-time is better.
-	// Let's do a blocking execution and return final report log.
-
+	// Set up streaming headers immediately
 	flusher, ok := w.(http.Flusher)
 	if !ok {
 		http.Error(w, "Streaming not supported", http.StatusInternalServerError)
@@ -885,6 +860,23 @@ func (s *Server) handleVerifyDrift(w http.ResponseWriter, r *http.Request) {
 		})
 		fmt.Fprint(w, "\n")
 		flusher.Flush()
+	}
+
+	// 1. Initial State Check
+	cfg := s.manager.GetConfig()
+	routers := s.manager.GetRouters()
+	var master, backup *Router
+	for _, router := range routers {
+		if router.VRRPState == "MASTER" {
+			master = router
+		} else if router.VRRPState == "BACKUP" {
+			backup = router
+		}
+	}
+
+	if master == nil || backup == nil {
+		sendEvent("init", "error", "无法开始验证：集群状态不健康（未找到 MASTER 或 BACKUP 节点）。请先确保诊断全部通过。")
+		return
 	}
 
 	sendEvent("init", "running", fmt.Sprintf("当前主节点: %s, 备节点: %s", master.Name, backup.Name))

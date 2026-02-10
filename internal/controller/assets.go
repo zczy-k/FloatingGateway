@@ -2386,9 +2386,14 @@ document.addEventListener('DOMContentLoaded', () => {
             
             while (true) {
                 const { done, value } = await reader.read();
-                if (done) break;
+                if (done) {
+                    console.log('Stream finished');
+                    break;
+                }
                 
-                buffer += decoder.decode(value, {stream: true});
+                const chunk = decoder.decode(value, {stream: true});
+                console.log('Received chunk:', chunk);
+                buffer += chunk;
                 const lines = buffer.split('\n');
                 
                 // Keep the last partial line in buffer
