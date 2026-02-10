@@ -117,6 +117,7 @@ type Manager struct {
 	config     *ControllerConfig
 	configPath string
 	mu         sync.RWMutex
+	dlMu       sync.Mutex // Mutex for binary downloads
 }
 
 // NewManager creates a new router manager.
@@ -923,9 +924,18 @@ func (m *Manager) downloadAgentBinary(r *Router, goos, goarch string) (string, e
 	cacheDir := m.agentCacheDir()
 	destPath := filepath.Join(cacheDir, binaryName)
 
-	// Check if already cached
+	// Check if already cached (without lock first for speed)
 	if info, err := os.Stat(destPath); err == nil && info.Size() > 0 {
 		r.AddLog("   已有缓存: " + destPath)
+		return destPath, nil
+	}
+
+	// Acquire download lock to avoid redundant downloads and file conflicts
+	m.dlMu.Lock()
+	defer m.dlMu.Unlock()
+
+	// Re-check cache after acquiring lock (double-checked locking)
+	if info, err := os.Stat(destPath); err == nil && info.Size() > 0 {
 		return destPath, nil
 	}
 
@@ -962,9 +972,6 @@ func (m *Manager) downloadAgentBinary(r *Router, goos, goarch string) (string, e
 
 	client := &http.Client{Timeout: 120 * time.Second}
 
-	// Use unique temp file name with PID to avoid conflicts
-	tmpPath := fmt.Sprintf("%s.%d.tmp", destPath, os.Getpid())
-
 	for i, url := range urls {
 		if i > 0 {
 			r.AddLog(fmt.Sprintf("   尝试备用下载源 (%d/%d)...", i+1, len(urls)))
@@ -984,18 +991,19 @@ func (m *Manager) downloadAgentBinary(r *Router, goos, goarch string) (string, e
 			continue
 		}
 
-		// Ensure cache directory still exists (in case it was deleted)
+		// Ensure cache directory still exists
 		if err := os.MkdirAll(cacheDir, 0755); err != nil {
 			resp.Body.Close()
 			return "", fmt.Errorf("创建缓存目录失败: %w", err)
 		}
 
-		// Download to temp file first
-		f, err := os.Create(tmpPath)
+		// Create a truly unique temp file to avoid concurrent install conflicts
+		f, err := os.CreateTemp(cacheDir, binaryName+".*.tmp")
 		if err != nil {
 			resp.Body.Close()
 			return "", fmt.Errorf("创建临时文件失败: %w", err)
 		}
+		tmpPath := f.Name()
 
 		written, err := io.Copy(f, resp.Body)
 		f.Close()
@@ -1015,7 +1023,7 @@ func (m *Manager) downloadAgentBinary(r *Router, goos, goarch string) (string, e
 
 		// Rename temp to final (use copy if rename fails due to cross-device)
 		if err := os.Rename(tmpPath, destPath); err != nil {
-			// If rename fails, try copy + delete
+			// If rename fails (e.g. cross-device or permission), try copy + delete
 			if err := copyFile(tmpPath, destPath); err != nil {
 				os.Remove(tmpPath)
 				return "", fmt.Errorf("移动文件失败: %w", err)
