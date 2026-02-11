@@ -84,10 +84,12 @@ gateway-agent status --json
 
 - **Q: 如何升级到最新版本？**
   A: 在 Web UI 中点击"检查更新"按钮，如果有新版本会显示"自动升级"按钮，点击即可一键升级。
+- **Q: VIP 漂移验证失败怎么办？**
+  A: 这是最常见的问题。请参考 [VIP 漂移故障排查指南](docs/TROUBLESHOOTING-VIP-DRIFT.md)，或在备节点上运行 `bash scripts/fix-vrrp.sh --fix` 进行自动诊断和修复。
 - **Q: PVE 环境下 VIP 无法漂移？**
-  A: 请在 PVE 的网卡设置中关闭 "IP Anti-Spoofing" 或允许 MAC 地址欺骗。
+  A: 请在 PVE 的网卡设置中关闭 "IP Anti-Spoofing" 或允许 MAC 地址欺骗。同时确保防火墙允许 VRRP 协议 (112)。
 - **Q: 防火墙需要开什么端口？**
-  A: 必须允许 **VRRP 协议 (112)** 在 LAN 内通行。
+  A: 必须允许 **VRRP 协议 (112)** 在 LAN 内通行。可以运行 `iptables -I INPUT -p 112 -j ACCEPT` 添加规则。
 - **Q: 为什么显示 Unhealthy？**
   A: 检查你的旁路由是否真的能访问国际互联网（如果你开启了 internet 模式）。
 

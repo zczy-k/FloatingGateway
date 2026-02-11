@@ -963,42 +963,107 @@ func (s *Server) handleVerifyDrift(w http.ResponseWriter, r *http.Request) {
 		if err := sshBackup.Connect(); err == nil {
 			defer sshBackup.Close()
 
-			// Check if it has VIP
-			out, _ := sshBackup.RunCombined(fmt.Sprintf("ip addr show | grep %s", cfg.LAN.VIP))
-			hasVIP := strings.Contains(out, cfg.LAN.VIP)
+			// Collect diagnostic information
+			var diagInfo []string
 
-			// Check Keepalived state
-			stateOut, _ := sshBackup.RunCombined("cat /tmp/keepalived.GATEWAY.state")
+			// 1. Check if Keepalived is running
+			psOut, _ := sshBackup.RunCombined("ps | grep keepalived | grep -v grep")
+			isKeepalived := strings.Contains(psOut, "keepalived")
+			if !isKeepalived {
+				diagInfo = append(diagInfo, "Keepalived 未运行")
+			} else {
+				diagInfo = append(diagInfo, "Keepalived 正在运行")
+			}
+
+			// 2. Check if it has VIP
+			out, _ := sshBackup.RunCombined(fmt.Sprintf("ip addr show dev %s | grep %s", cfg.LAN.Iface, cfg.LAN.VIP))
+			hasVIP := strings.Contains(out, cfg.LAN.VIP)
+			if hasVIP {
+				diagInfo = append(diagInfo, "VIP 已分配到备节点")
+			} else {
+				diagInfo = append(diagInfo, "VIP 未分配到备节点")
+			}
+
+			// 3. Check Keepalived state
+			stateOut, _ := sshBackup.RunCombined("cat /tmp/keepalived.GATEWAY.state 2>/dev/null")
 			state := strings.TrimSpace(stateOut)
+			if state == "" {
+				state = "UNKNOWN (状态文件不存在)"
+				diagInfo = append(diagInfo, "状态文件不存在，notify 脚本可能未执行")
+			} else {
+				diagInfo = append(diagInfo, fmt.Sprintf("VRRP 状态: %s", state))
+			}
+
+			// 4. Check for unicast config
+			isUnicast := false
+			configPath := "/etc/keepalived/keepalived.conf"
+			_, _, err := sshBackup.Run(fmt.Sprintf("grep 'unicast_peer' %s", configPath))
+			if err != nil {
+				// Try OpenWrt path
+				configPath = "/tmp/keepalived.conf"
+				_, _, err = sshBackup.Run(fmt.Sprintf("grep 'unicast_peer' %s", configPath))
+			}
+			if err == nil {
+				isUnicast = true
+				diagInfo = append(diagInfo, "使用单播模式 (unicast)")
+			} else {
+				diagInfo = append(diagInfo, "使用组播模式 (multicast)")
+			}
+
+			// 5. Check firewall rules for VRRP
+			fwOut, _ := sshBackup.RunCombined("iptables -L INPUT -n 2>/dev/null | grep 112")
+			if strings.TrimSpace(fwOut) == "" {
+				diagInfo = append(diagInfo, "防火墙未发现 VRRP (协议112) 放行规则")
+			} else {
+				diagInfo = append(diagInfo, "防火墙已放行 VRRP")
+			}
+
+			// 6. Check connectivity to master (if unicast)
+			if isUnicast {
+				pingOut, _ := sshBackup.RunCombined(fmt.Sprintf("ping -c 1 -W 2 %s 2>&1", master.Host))
+				if strings.Contains(pingOut, "1 received") || strings.Contains(pingOut, "1 packets received") {
+					diagInfo = append(diagInfo, fmt.Sprintf("可以 Ping 通主节点 %s", master.Host))
+				} else {
+					diagInfo = append(diagInfo, fmt.Sprintf("无法 Ping 通主节点 %s", master.Host))
+				}
+			}
+
+			// 7. Check config validity
+			configValidOut, _ := sshBackup.RunCombined(fmt.Sprintf("keepalived -t -f %s 2>&1", configPath))
+			if strings.Contains(configValidOut, "Configuration is valid") || strings.Contains(configValidOut, "Successful") {
+				diagInfo = append(diagInfo, "配置文件语法正确")
+			} else {
+				diagInfo = append(diagInfo, "配置文件可能有误")
+			}
+
+			// 8. Try to get recent Keepalived logs
+			logOut, _ := sshBackup.RunCombined("logread 2>/dev/null | grep -i keepalived | tail -n 3")
+			if logOut == "" {
+				logOut, _ = sshBackup.RunCombined("tail -n 3 /var/log/syslog 2>/dev/null | grep -i keepalived")
+			}
+			if strings.TrimSpace(logOut) != "" {
+				diagInfo = append(diagInfo, fmt.Sprintf("最近日志: %s", strings.TrimSpace(logOut)))
+			}
+
+			// Build error message based on diagnosis
+			diagSummary := strings.Join(diagInfo, "; ")
 
 			if hasVIP {
-				sendEvent("verify_drift", "error", fmt.Sprintf("诊断结果：备节点 (%s) 已接管 VIP，但控制端无法访问。可能是防火墙拦截了 ICMP 或 ARP 广播未生效。", backup.Name))
+				sendEvent("verify_drift", "error", fmt.Sprintf("诊断结果：备节点 (%s) 已接管 VIP，但控制端无法访问。可能是防火墙拦截了 ICMP 或 ARP 广播未生效。详情: %s", backup.Name, diagSummary))
+			} else if !isKeepalived {
+				sendEvent("verify_drift", "error", fmt.Sprintf("诊断结果：备节点 (%s) 的 Keepalived 未运行。请检查服务状态。详情: %s", backup.Name, diagSummary))
+			} else if isUnicast {
+				// Unicast mode specific diagnosis
+				if strings.Contains(diagSummary, "无法 Ping 通主节点") {
+					sendEvent("verify_drift", "error", fmt.Sprintf("诊断结果：备节点 (%s) 无法与主节点通信 (单播模式)。请检查网络连通性。详情: %s", backup.Name, diagSummary))
+				} else if strings.Contains(diagSummary, "防火墙未发现") {
+					sendEvent("verify_drift", "error", fmt.Sprintf("诊断结果：备节点 (%s) 防火墙可能拦截了 VRRP 协议 (协议号112)。建议执行: iptables -I INPUT -p 112 -j ACCEPT。详情: %s", backup.Name, diagSummary))
+				} else {
+					sendEvent("verify_drift", "error", fmt.Sprintf("诊断结果：备节点 (%s) 未能接管 VIP (单播模式)。VRRP 协商可能失败，请检查 Keepalived 日志。详情: %s", backup.Name, diagSummary))
+				}
 			} else {
-				// Check for unicast config
-				isUnicast := false
-				// Check standard path first
-				_, _, err := sshBackup.Run("grep 'unicast_peer' /etc/keepalived/keepalived.conf")
-				if err == nil {
-					isUnicast = true
-				} else {
-					// Check OpenWrt path fallback
-					_, _, err = sshBackup.Run("grep 'unicast_peer' /tmp/keepalived.conf")
-					if err == nil {
-						isUnicast = true
-					}
-				}
-
-				if isUnicast {
-					// Check connectivity to master
-					pingOut, _ := sshBackup.RunCombined(fmt.Sprintf("ping -c 1 -W 1 %s", master.Host))
-					if strings.Contains(pingOut, "1 received") || strings.Contains(pingOut, "1 packets received") {
-						sendEvent("verify_drift", "error", fmt.Sprintf("诊断结果：备节点 (%s) 未能接管 VIP。单播通信正常 (Ping通)，但 VRRP 协商失败。请检查 Keepalived 日志。", backup.Name))
-					} else {
-						sendEvent("verify_drift", "error", fmt.Sprintf("诊断结果：备节点 (%s) 未能接管 VIP。单播通信失败 (无法 Ping 通主节点 %s)。请检查底层网络连通性。", backup.Name, master.Host))
-					}
-				} else {
-					sendEvent("verify_drift", "error", fmt.Sprintf("诊断结果：备节点 (%s) 未能接管 VIP。当前状态: %s。可能是 VRRP 组播被拦截 (请检查 PVE/ESXi 网卡防火墙)。", backup.Name, state))
-				}
+				// Multicast mode
+				sendEvent("verify_drift", "error", fmt.Sprintf("诊断结果：备节点 (%s) 未能接管 VIP (组播模式)。可能是 VRRP 组播被拦截，请检查 PVE/ESXi 网卡设置或防火墙。详情: %s", backup.Name, diagSummary))
 			}
 		} else {
 			sendEvent("verify_drift", "error", fmt.Sprintf("诊断失败：无法连接到备节点 (%s) 进行检查。", backup.Name))
